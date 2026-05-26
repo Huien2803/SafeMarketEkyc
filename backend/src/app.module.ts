@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
+import { EkycModule } from './ekyc/ekyc.module';
 import { User } from './entities/user.entity';
 import { Score } from './entities/score.entity';
 import { EkycProfile } from './entities/ekyc-profile.entity';
@@ -39,6 +40,7 @@ import { PointLog } from './entities/point-log.entity';
     }),
     AuthModule,
     UsersModule,
+    EkycModule,
   ],
 })
 export class AppModule {}
