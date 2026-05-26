@@ -9,8 +9,14 @@ import 'package:safemarket_app/services/user_service.dart';
 import 'package:safemarket_app/widgets/verified_badge.dart';
 
 /// Màn hình Cá nhân — lấy dữ liệu thật từ API `/users/me`.
+///
+/// [onBack] là callback dùng khi ProfileScreen được nhúng làm 1 tab của
+/// `MarketplaceHomeScreen` (qua IndexedStack). Nếu callback != null thì nút
+/// back trên app bar sẽ gọi nó (chuyển tab về Home) thay vì pop route.
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+  const ProfileScreen({super.key, this.onBack});
+
+  final VoidCallback? onBack;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -30,6 +36,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _profileFuture = UserService.instance.getMyProfile();
     });
     await _profileFuture;
+  }
+
+  /// Nếu được nhúng làm tab (có callback) -> chuyển tab về Home.
+  /// Nếu được push như 1 route độc lập -> pop quay lại màn trước.
+  /// Trường hợp xấu nhất (route gốc, không có gì để pop) -> về '/home'.
+  void _handleBack() {
+    if (widget.onBack != null) {
+      widget.onBack!();
+      return;
+    }
+    final nav = Navigator.of(context);
+    if (nav.canPop()) {
+      nav.pop();
+    } else {
+      nav.pushNamedAndRemoveUntil('/home', (_) => false);
+    }
   }
 
   Future<void> _confirmLogout() async {
@@ -85,9 +107,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 slivers: [
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 8, 12, 0),
+                      padding: const EdgeInsets.fromLTRB(8, 8, 12, 0),
                       child: Row(
                         children: [
+                          IconButton(
+                            tooltip: 'Về trang chủ',
+                            icon: const Icon(
+                              Icons.arrow_back_ios_new,
+                              size: 20,
+                            ),
+                            onPressed: _handleBack,
+                          ),
                           const Text(
                             'Cá nhân',
                             style: TextStyle(

@@ -4,7 +4,15 @@ import 'package:safemarket_app/core/theme/app_colors.dart';
 import 'package:safemarket_app/screens/product_detail.dart';
 import 'package:safemarket_app/screens/profile_screen.dart';
 
-/// Màn hình Chợ đồ cũ — tìm kiếm, danh mục, lưới sản phẩm, bottom nav + FAB đăng tin.
+/// Màn hình "shell" của app sau khi đăng nhập.
+///
+/// Dùng [IndexedStack] để giữ state của từng tab (scroll position, dữ liệu
+/// đã load không bị reset khi chuyển tab) — đây là pattern chuẩn của Flutter
+/// cho bottom navigation và cho UX mượt nhất:
+///   - Không push/pop route khi đổi tab → không có hiệu ứng trượt rườm rà
+///   - Không có chuyện stack chồng nhiều bản Profile/Home cùng lúc
+///   - Nút back của Android: ở tab khác Home -> quay về tab Home,
+///     ở tab Home -> thoát app (PopScope điều khiển).
 class MarketplaceHomeScreen extends StatefulWidget {
   const MarketplaceHomeScreen({super.key});
 
@@ -14,6 +22,114 @@ class MarketplaceHomeScreen extends StatefulWidget {
 
 class _MarketplaceHomeScreenState extends State<MarketplaceHomeScreen> {
   int _bottomIndex = 0;
+
+  void _switchTab(int index) {
+    if (_bottomIndex == index) return;
+    setState(() => _bottomIndex = index);
+  }
+
+  void _goHome() => _switchTab(0);
+
+  @override
+  Widget build(BuildContext context) {
+    // PopScope: bắt nút back Android.
+    //   - Đang ở tab Home -> cho phép pop (thoát app)
+    //   - Đang ở tab khác -> chặn pop và chuyển về tab Home
+    return PopScope(
+      canPop: _bottomIndex == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _bottomIndex != 0) {
+          _goHome();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        body: SafeArea(
+          top: false,
+          child: IndexedStack(
+            index: _bottomIndex,
+            children: [
+              const _HomeTab(),
+              const _PlaceholderTab(
+                icon: Icons.favorite_border,
+                title: 'Yêu thích',
+                subtitle: 'Danh sách sản phẩm bạn đã lưu sẽ hiện ở đây.',
+              ),
+              const _PlaceholderTab(
+                icon: Icons.chat_bubble_outline,
+                title: 'Tin nhắn',
+                subtitle: 'Hội thoại với người bán sẽ hiện ở đây.',
+              ),
+              ProfileScreen(onBack: _goHome),
+            ],
+          ),
+        ),
+        floatingActionButton: _bottomIndex == 0
+            ? FloatingActionButton(
+                onPressed: () {},
+                backgroundColor: AppColors.primary,
+                elevation: 6,
+                shape: const CircleBorder(),
+                child: const Icon(Icons.add, color: AppColors.white, size: 32),
+              )
+            : null,
+        floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+        bottomNavigationBar: BottomAppBar(
+          color: AppColors.white,
+          elevation: 12,
+          notchMargin: 8,
+          shape: const CircularNotchedRectangle(),
+          child: SizedBox(
+            height: 60,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _NavItem(
+                  icon: Icons.home,
+                  label: 'CHỦ',
+                  selected: _bottomIndex == 0,
+                  onTap: () => _switchTab(0),
+                ),
+                _NavItem(
+                  icon: Icons.favorite_border,
+                  label: 'YÊU THÍCH',
+                  selected: _bottomIndex == 1,
+                  onTap: () => _switchTab(1),
+                ),
+                const SizedBox(width: 48), // khoảng cho FAB
+                _NavItem(
+                  icon: Icons.chat_bubble_outline,
+                  label: 'CHAT',
+                  selected: _bottomIndex == 2,
+                  onTap: () => _switchTab(2),
+                ),
+                _NavItem(
+                  icon: Icons.person_outline,
+                  label: 'TÔI',
+                  selected: _bottomIndex == 3,
+                  onTap: () => _switchTab(3),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// ====================================================================
+///  Tab 1: HOME (Marketplace) - nội dung cũ
+/// ====================================================================
+class _HomeTab extends StatefulWidget {
+  const _HomeTab();
+
+  @override
+  State<_HomeTab> createState() => _HomeTabState();
+}
+
+class _HomeTabState extends State<_HomeTab>
+    with AutomaticKeepAliveClientMixin {
   int _selectedCategory = 0;
 
   static const _categories = [
@@ -65,107 +181,47 @@ class _MarketplaceHomeScreenState extends State<MarketplaceHomeScreen> {
   ];
 
   @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: CustomScrollView(
-          slivers: [
-            // App bar: logo SafeMarket + chuông
-            SliverToBoxAdapter(child: _buildHeader()),
-            // Search + nút lọc
-            SliverToBoxAdapter(child: _buildSearchRow()),
-            // Danh mục cuộn ngang
-            SliverToBoxAdapter(child: _buildCategories()),
-            // Tiêu đề "DÀNH CHO BẠN"
-            SliverToBoxAdapter(child: _buildSectionTitle()),
-            // Lưới sản phẩm 2 cột
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
-              sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 0.72,
-                ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final product = _products[index % _products.length];
-                    return _ProductCard(
-                      product: product,
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute<void>(
-                            builder: (_) => const ProductDetailScreen(),
-                          ),
-                        );
-                      },
-                    );
-                  },
-                  childCount: _products.length,
-                ),
+    super.build(context);
+    return SafeArea(
+      child: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(child: _buildHeader()),
+          SliverToBoxAdapter(child: _buildSearchRow()),
+          SliverToBoxAdapter(child: _buildCategories()),
+          SliverToBoxAdapter(child: _buildSectionTitle()),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childAspectRatio: 0.72,
               ),
-            ),
-          ],
-        ),
-      ),
-      // BottomAppBar có notch cho FAB giữa
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {},
-        backgroundColor: AppColors.primary,
-        elevation: 6,
-        shape: const CircleBorder(),
-        child: const Icon(Icons.add, color: AppColors.white, size: 32),
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-      bottomNavigationBar: BottomAppBar(
-        color: AppColors.white,
-        elevation: 12,
-        notchMargin: 8,
-        shape: const CircularNotchedRectangle(),
-        child: SizedBox(
-          height: 60,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _NavItem(
-                icon: Icons.home,
-                label: 'CHỦ',
-                selected: _bottomIndex == 0,
-                onTap: () => setState(() => _bottomIndex = 0),
-              ),
-              _NavItem(
-                icon: Icons.favorite_border,
-                label: 'YÊU THÍCH',
-                selected: _bottomIndex == 1,
-                onTap: () => setState(() => _bottomIndex = 1),
-              ),
-              const SizedBox(width: 48), // khoảng cho FAB
-              _NavItem(
-                icon: Icons.chat_bubble_outline,
-                label: 'CHAT',
-                selected: _bottomIndex == 2,
-                onTap: () => setState(() => _bottomIndex = 2),
-              ),
-              _NavItem(
-                icon: Icons.person_outline,
-                label: 'TÔI',
-                selected: _bottomIndex == 3,
-                onTap: () {
-                  setState(() => _bottomIndex = 3);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => const ProfileScreen(),
-                    ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final product = _products[index % _products.length];
+                  return _ProductCard(
+                    product: product,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => const ProductDetailScreen(),
+                        ),
+                      );
+                    },
                   );
                 },
+                childCount: _products.length,
               ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -227,7 +283,7 @@ class _MarketplaceHomeScreenState extends State<MarketplaceHomeScreen> {
             child: TextField(
               decoration: InputDecoration(
                 hintText: 'Tìm sản phẩm, người bán uy tín',
-                prefixIcon: Icon(Icons.search, color: AppColors.textMuted),
+                prefixIcon: const Icon(Icons.search, color: AppColors.textMuted),
                 filled: true,
                 fillColor: AppColors.white,
                 border: OutlineInputBorder(
@@ -238,7 +294,6 @@ class _MarketplaceHomeScreenState extends State<MarketplaceHomeScreen> {
             ),
           ),
           const SizedBox(width: 10),
-          // Nút lọc eKYC — nền xanh, icon phễu trắng
           Material(
             color: AppColors.primary,
             borderRadius: BorderRadius.circular(14),
@@ -307,14 +362,14 @@ class _MarketplaceHomeScreenState extends State<MarketplaceHomeScreen> {
   }
 
   Widget _buildSectionTitle() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+    return const Padding(
+      padding: EdgeInsets.fromLTRB(20, 16, 20, 12),
       child: Row(
         children: [
-          const Icon(Icons.local_fire_department,
+          Icon(Icons.local_fire_department,
               color: Color(0xFFF97316), size: 22),
-          const SizedBox(width: 6),
-          const Text(
+          SizedBox(width: 6),
+          Text(
             'DÀNH CHO BẠN',
             style: TextStyle(
               fontSize: 16,
@@ -322,9 +377,77 @@ class _MarketplaceHomeScreenState extends State<MarketplaceHomeScreen> {
               color: AppColors.textPrimary,
             ),
           ),
-          const Spacer(),
+          Spacer(),
           Icon(Icons.grid_view, color: AppColors.textMuted, size: 20),
         ],
+      ),
+    );
+  }
+}
+
+/// ====================================================================
+///  Tab placeholder (Yêu thích / Chat) - sẽ thay nội dung thật sau
+/// ====================================================================
+class _PlaceholderTab extends StatelessWidget {
+  const _PlaceholderTab({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 96,
+                height: 96,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, size: 48, color: AppColors.primary),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                subtitle,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 14,
+                  height: 1.5,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Chip(
+                label: Text('Sắp ra mắt'),
+                backgroundColor: AppColors.ekycPendingBg,
+                labelStyle: TextStyle(
+                  color: AppColors.ekycPendingText,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -373,7 +496,6 @@ class _ProductCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Ảnh + nút yêu thích
             Expanded(
               flex: 3,
               child: Stack(
