@@ -1,123 +1,241 @@
 import 'package:flutter/material.dart';
 import 'package:safemarket_app/core/constants/app_decorations.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
+import 'package:safemarket_app/models/user_profile.dart';
+import 'package:safemarket_app/screens/auth/login_screen.dart';
 import 'package:safemarket_app/screens/identity_verification.dart';
+import 'package:safemarket_app/services/auth_service.dart';
+import 'package:safemarket_app/services/user_service.dart';
 import 'package:safemarket_app/widgets/verified_badge.dart';
 
-/// Màn hình Cá nhân — thống kê, thẻ tín nhiệm, trạng thái eKYC, tin đang bán.
-class ProfileScreen extends StatelessWidget {
+/// Màn hình Cá nhân — lấy dữ liệu thật từ API `/users/me`.
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
+
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  late Future<UserProfile> _profileFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _profileFuture = UserService.instance.getMyProfile();
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      _profileFuture = UserService.instance.getMyProfile();
+    });
+    await _profileFuture;
+  }
+
+  Future<void> _confirmLogout() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Đăng xuất'),
+        content: const Text('Bạn có chắc muốn đăng xuất khỏi SafeMarket?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Huỷ'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Đăng xuất'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await AuthService.instance.logout();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
+      (_) => false,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: CustomScrollView(
-          slivers: [
-            // Header: tiêu đề + chuông + cài đặt
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 12, 0),
-                child: Row(
-                  children: [
-                    const Text(
-                      'Cá nhân',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.textPrimary,
+        child: FutureBuilder<UserProfile>(
+          future: _profileFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return _ErrorState(
+                message: snapshot.error.toString(),
+                onRetry: _refresh,
+                onLogout: _confirmLogout,
+              );
+            }
+            final profile = snapshot.data!;
+            return RefreshIndicator(
+              onRefresh: _refresh,
+              child: CustomScrollView(
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 8, 12, 0),
+                      child: Row(
+                        children: [
+                          const Text(
+                            'Cá nhân',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          const Spacer(),
+                          IconButton(
+                            icon: const Icon(Icons.notifications_outlined),
+                            onPressed: () {},
+                          ),
+                          IconButton(
+                            tooltip: 'Đăng xuất',
+                            icon: const Icon(Icons.logout),
+                            onPressed: _confirmLogout,
+                          ),
+                        ],
                       ),
                     ),
-                    const Spacer(),
-                    IconButton(
-                      icon: const Icon(Icons.notifications_outlined),
-                      onPressed: () {},
+                  ),
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _UserHeaderSection(profile: profile),
+                          const SizedBox(height: 20),
+                          _StatsRow(profile: profile),
+                          const SizedBox(height: 20),
+                          _TrustCard(trustScore: profile.trustScore),
+                          const SizedBox(height: 24),
+                          const Text(
+                            'TRẠNG THÁI XÁC THỰC',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 1,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          _EkycTile(ekyc: profile.ekyc),
+                          const SizedBox(height: 10),
+                          const _VerificationTile(
+                            icon: Icons.shopping_bag_outlined,
+                            iconColor: AppColors.primary,
+                            title: 'Giao dịch thành công',
+                            subtitle: 'Chưa có giao dịch',
+                            trailing: Icon(
+                              Icons.chevron_right,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'ĐANG RAO BÁN (0)',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: () {},
+                                child: const Text('Xem tất cả'),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.all(20),
+                            decoration: AppDecorations.card(),
+                            child: const Center(
+                              child: Text(
+                                'Bạn chưa đăng tin nào',
+                                style: TextStyle(
+                                  color: AppColors.textMuted,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                        ],
+                      ),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.settings_outlined),
-                      onPressed: () {},
-                    ),
-                  ],
-                ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _ErrorState extends StatelessWidget {
+  const _ErrorState({
+    required this.message,
+    required this.onRetry,
+    required this.onLogout,
+  });
+
+  final String message;
+  final VoidCallback onRetry;
+  final VoidCallback onLogout;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.cloud_off, size: 56, color: AppColors.textMuted),
+            const SizedBox(height: 16),
+            const Text(
+              'Không tải được hồ sơ',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
               ),
             ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _UserHeaderSection(),
-                    const SizedBox(height: 20),
-                    // Bố cục 1/3: Đã bán | Đã mua | Đánh giá
-                    _StatsRow(),
-                    const SizedBox(height: 20),
-                    // Thẻ tín nhiệm gradient
-                    _TrustCard(),
-                    const SizedBox(height: 24),
-                    const Text(
-                      'TRẠNG THÁI XÁC THỰC',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _VerificationTile(
-                      icon: Icons.shield,
-                      iconColor: AppColors.trustGreen,
-                      title: 'Định danh eKYC',
-                      subtitle: 'Đã xác minh bởi FPT Vision',
-                      trailing: Icon(
-                        Icons.check_circle,
-                        color: AppColors.trustGreen,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    _VerificationTile(
-                      icon: Icons.shopping_bag_outlined,
-                      iconColor: AppColors.primary,
-                      title: 'Giao dịch thành công',
-                      subtitle: 'Tỉ lệ đơn hoàn tất: 98%',
-                      trailing: const Icon(
-                        Icons.chevron_right,
-                        color: AppColors.textMuted,
-                      ),
-                      onTap: () {},
-                    ),
-                    const SizedBox(height: 24),
-                    // Đang rao bán
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'ĐANG RAO BÁN (2)',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: () {},
-                          child: const Text('Xem tất cả'),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(child: _SellingProductCard()),
-                        const SizedBox(width: 12),
-                        Expanded(child: _SellingProductCard()),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                  ],
-                ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Thử lại'),
+            ),
+            TextButton.icon(
+              onPressed: onLogout,
+              icon: const Icon(Icons.logout, color: Colors.red),
+              label: const Text(
+                'Đăng xuất',
+                style: TextStyle(color: Colors.red),
               ),
             ),
           ],
@@ -127,8 +245,10 @@ class ProfileScreen extends StatelessWidget {
   }
 }
 
-/// Avatar bo góc + badge ShieldCheck góc dưới phải.
 class _UserHeaderSection extends StatelessWidget {
+  const _UserHeaderSection({required this.profile});
+  final UserProfile profile;
+
   @override
   Widget build(BuildContext context) {
     return Row(
@@ -144,10 +264,10 @@ class _UserHeaderSection extends StatelessWidget {
                 color: const Color(0xFFBFDBFE),
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: const Center(
+              child: Center(
                 child: Text(
-                  'NA',
-                  style: TextStyle(
+                  profile.initials,
+                  style: const TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
                     color: AppColors.primary,
@@ -155,11 +275,12 @@ class _UserHeaderSection extends StatelessWidget {
                 ),
               ),
             ),
-            const Positioned(
-              right: -4,
-              bottom: -4,
-              child: VerifiedBadge(size: 24),
-            ),
+            if (profile.ekyc.isVerified)
+              const Positioned(
+                right: -4,
+                bottom: -4,
+                child: VerifiedBadge(size: 24),
+              ),
           ],
         ),
         const SizedBox(width: 16),
@@ -167,38 +288,70 @@ class _UserHeaderSection extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Nguyễn Văn An',
-                style: TextStyle(
+              Text(
+                profile.displayName ?? profile.email,
+                style: const TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w800,
                   color: AppColors.textPrimary,
                 ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Row(
                 children: [
-                  Icon(Icons.location_on_outlined,
-                      size: 14, color: AppColors.textSecondary),
+                  const Icon(
+                    Icons.email_outlined,
+                    size: 14,
+                    color: AppColors.textSecondary,
+                  ),
                   const SizedBox(width: 4),
-                  const Text(
-                    'Quận 1, TP. HCM',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: AppColors.textSecondary,
+                  Expanded(
+                    child: Text(
+                      profile.email,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
               ),
+              if (profile.location != null && profile.location!.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.location_on_outlined,
+                      size: 14,
+                      color: AppColors.textSecondary,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      profile.location!,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 4),
               Row(
                 children: [
-                  Icon(Icons.calendar_today_outlined,
-                      size: 14, color: AppColors.textSecondary),
+                  const Icon(
+                    Icons.calendar_today_outlined,
+                    size: 14,
+                    color: AppColors.textSecondary,
+                  ),
                   const SizedBox(width: 4),
-                  const Text(
-                    'Gia nhập: Tháng 05/2023',
-                    style: TextStyle(
+                  Text(
+                    'Gia nhập: ${_formatJoinDate(profile.createdAt)}',
+                    style: const TextStyle(
                       fontSize: 13,
                       color: AppColors.textSecondary,
                     ),
@@ -211,25 +364,26 @@ class _UserHeaderSection extends StatelessWidget {
       ],
     );
   }
+
+  String _formatJoinDate(DateTime d) {
+    final mm = d.month.toString().padLeft(2, '0');
+    return 'Tháng $mm/${d.year}';
+  }
 }
 
-/// Ba cột thống kê đều nhau.
 class _StatsRow extends StatelessWidget {
+  const _StatsRow({required this.profile});
+  final UserProfile profile;
+
   @override
   Widget build(BuildContext context) {
     return Row(
-      children: [
-        Expanded(
-          child: _StatCard(value: '45', label: 'ĐÃ BÁN'),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _StatCard(value: '12', label: 'ĐÃ MUA'),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _StatCard(value: '4.9⭐', label: 'ĐÁNH GIÁ'),
-        ),
+      children: const [
+        Expanded(child: _StatCard(value: '0', label: 'ĐÃ BÁN')),
+        SizedBox(width: 10),
+        Expanded(child: _StatCard(value: '0', label: 'ĐÃ MUA')),
+        SizedBox(width: 10),
+        Expanded(child: _StatCard(value: '—', label: 'ĐÁNH GIÁ')),
       ],
     );
   }
@@ -272,13 +426,23 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-/// Trust Card — gradient xanh → tím, progress, badge VÀNG.
 class _TrustCard extends StatelessWidget {
+  const _TrustCard({required this.trustScore});
+  final TrustScore? trustScore;
+
   @override
   Widget build(BuildContext context) {
-    const score = 850;
-    const maxScore = 1000;
-    final progress = score / maxScore;
+    final score = trustScore;
+    if (score == null) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.grey[300],
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Text('Chưa có điểm tín nhiệm'),
+      );
+    }
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -303,20 +467,23 @@ class _TrustCard extends StatelessWidget {
                 ),
               ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.emoji_events, color: Colors.amber, size: 16),
-                    SizedBox(width: 4),
+                    Icon(_rankIcon(score.rankLevel),
+                        color: Colors.amber, size: 16),
+                    const SizedBox(width: 4),
                     Text(
-                      'VÀNG',
-                      style: TextStyle(
+                      score.rankLabel,
+                      style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
                         color: Colors.white,
@@ -328,9 +495,9 @@ class _TrustCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          const Text(
-            '850 / 1000',
-            style: TextStyle(
+          Text(
+            '${score.currentPoint} / ${score.maxPoint}',
+            style: const TextStyle(
               fontSize: 32,
               fontWeight: FontWeight.w800,
               color: Colors.white,
@@ -340,7 +507,7 @@ class _TrustCard extends StatelessWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
-              value: progress,
+              value: score.progress,
               minHeight: 8,
               backgroundColor: Colors.white24,
               color: Colors.white,
@@ -349,12 +516,15 @@ class _TrustCard extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              Icon(Icons.shield_outlined,
-                  size: 16, color: Colors.white.withValues(alpha: 0.9)),
+              Icon(
+                Icons.shield_outlined,
+                size: 16,
+                color: Colors.white.withValues(alpha: 0.9),
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  'Tài khoản an toàn. Ưu tiên hiển thị trên sàn.',
+                  _trustMessage(score.rankLevel),
                   style: TextStyle(
                     fontSize: 12,
                     color: Colors.white.withValues(alpha: 0.9),
@@ -365,6 +535,90 @@ class _TrustCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  IconData _rankIcon(String level) {
+    switch (level) {
+      case 'Diamond':
+        return Icons.diamond;
+      case 'Gold':
+        return Icons.emoji_events;
+      case 'Silver':
+        return Icons.military_tech;
+      default:
+        return Icons.workspace_premium;
+    }
+  }
+
+  String _trustMessage(String level) {
+    switch (level) {
+      case 'Diamond':
+        return 'Tài khoản uy tín bậc nhất.';
+      case 'Gold':
+        return 'Tài khoản an toàn. Ưu tiên hiển thị trên sàn.';
+      case 'Silver':
+        return 'Đang xây dựng uy tín. Hoàn tất eKYC để tăng điểm.';
+      default:
+        return 'Mới gia nhập. Hoàn tất eKYC để tăng điểm tín nhiệm.';
+    }
+  }
+}
+
+class _EkycTile extends StatelessWidget {
+  const _EkycTile({required this.ekyc});
+  final EkycSummary ekyc;
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, color, subtitle, trailing) = _state();
+    return _VerificationTile(
+      icon: icon,
+      iconColor: color,
+      title: 'Định danh eKYC',
+      subtitle: subtitle,
+      trailing: trailing,
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => const IdentityVerificationScreen(),
+          ),
+        );
+      },
+    );
+  }
+
+  (IconData, Color, String, Widget) _state() {
+    if (ekyc.isVerified) {
+      return (
+        Icons.shield,
+        AppColors.trustGreen,
+        'Đã xác minh${ekyc.fullName != null ? ' • ${ekyc.fullName}' : ''}',
+        const Icon(Icons.check_circle, color: AppColors.trustGreen),
+      );
+    }
+    if (ekyc.isPending) {
+      return (
+        Icons.hourglass_bottom,
+        Colors.orange,
+        'Đang chờ duyệt eKYC',
+        const Icon(Icons.chevron_right, color: AppColors.textMuted),
+      );
+    }
+    if (ekyc.isRejected) {
+      return (
+        Icons.error_outline,
+        Colors.red,
+        'eKYC bị từ chối, hãy nộp lại',
+        const Icon(Icons.chevron_right, color: AppColors.textMuted),
+      );
+    }
+    return (
+      Icons.shield_outlined,
+      AppColors.textMuted,
+      'Chưa xác thực — bấm để xác minh ngay',
+      const Icon(Icons.chevron_right, color: AppColors.textMuted),
     );
   }
 }
@@ -392,17 +646,7 @@ class _VerificationTile extends StatelessWidget {
       color: AppColors.white,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
-        onTap: onTap ??
-            (title.contains('eKYC')
-                ? () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute<void>(
-                        builder: (_) => const IdentityVerificationScreen(),
-                      ),
-                    );
-                  }
-                : null),
+        onTap: onTap,
         borderRadius: BorderRadius.circular(16),
         child: Container(
           padding: const EdgeInsets.all(16),
@@ -446,53 +690,6 @@ class _VerificationTile extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _SellingProductCard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: AppDecorations.card(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            height: 100,
-            decoration: const BoxDecoration(
-              color: Color(0xFFF3F4F6),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-            ),
-            child: const Center(
-              child: Icon(Icons.devices, color: AppColors.textMuted, size: 40),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  '12.000.000đ',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.primary,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  'MacBook Air M1',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }

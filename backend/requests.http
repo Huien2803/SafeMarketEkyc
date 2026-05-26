@@ -1,0 +1,97 @@
+### SafeMarket API - REST Client test file
+### Cài extension "REST Client" (humao.rest-client) trong VS Code
+### Click "Send Request" ở trên mỗi block để chạy
+
+@baseUrl = http://localhost:3000/api
+@contentType = application/json
+
+# ============================================
+# 1. Đăng ký user mới
+# ============================================
+# @name register
+POST {{baseUrl}}/auth/register
+Content-Type: {{contentType}}
+
+{
+  "phoneNumber": "0359599503",
+  "email": "hien@huflit.edu.vn",
+  "password": "MatKhau@123",
+  "displayName": "Trương Trí Hiền",
+  "location": "TP.HCM"
+}
+
+###
+
+# ============================================
+# 2. Đăng nhập (dùng email hoặc số điện thoại)
+# ============================================
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "identifier": "hien@huflit.edu.vn",
+  "password": "MatKhau@123"
+}
+
+###
+
+@token = {{login.response.body.accessToken}}
+
+# ============================================
+# 3. Xem thông tin tài khoản đang đăng nhập (cần Bearer token)
+# ============================================
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{token}}
+
+###
+
+# ============================================
+# 4. Xem profile + trust score + eKYC của tôi
+# ============================================
+GET {{baseUrl}}/users/me
+Authorization: Bearer {{token}}
+
+###
+
+# ============================================
+# 5. Xem profile public của user khác (vd userId=1)
+# ============================================
+GET {{baseUrl}}/users/1
+Authorization: Bearer {{token}}
+
+###
+
+# ============================================
+# 6. Test các case lỗi
+# ============================================
+
+### 6.1. Register thiếu trường
+POST {{baseUrl}}/auth/register
+Content-Type: {{contentType}}
+
+{
+  "email": "thieu@huflit.edu.vn"
+}
+
+### 6.2. Register trùng email
+POST {{baseUrl}}/auth/register
+Content-Type: {{contentType}}
+
+{
+  "phoneNumber": "0987654321",
+  "email": "hien@huflit.edu.vn",
+  "password": "Khac@123"
+}
+
+### 6.3. Login sai mật khẩu
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "identifier": "hien@huflit.edu.vn",
+  "password": "SaiMatKhau"
+}
+
+### 6.4. Truy cập /me không có token
+GET {{baseUrl}}/users/me
