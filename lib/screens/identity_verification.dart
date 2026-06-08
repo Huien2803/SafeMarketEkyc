@@ -12,9 +12,10 @@ import 'package:safemarket_app/services/ekyc_service.dart';
 ///   1. intro:        hướng dẫn chuẩn bị
 ///   2. frontIdCard:  chụp mặt trước CCCD -> FPT.AI OCR
 ///   3. backIdCard:   chụp mặt sau CCCD -> FPT.AI OCR
-///   4. selfie:       chụp selfie -> FPT.AI Face Match -> submit
+///   4. liveness:     kiểm tra người thật
+///   5. selfie:       chụp selfie -> Face Match -> submit
 ///   -> result
-enum _EkycStep { intro, frontIdCard, backIdCard, selfie, result }
+enum _EkycStep { intro, frontIdCard, backIdCard, liveness, selfie, result }
 
 class IdentityVerificationScreen extends StatefulWidget {
   const IdentityVerificationScreen({super.key});
@@ -35,11 +36,13 @@ class _IdentityVerificationScreenState
   // Dữ liệu giữa các bước
   File? _frontFile;
   File? _backFile;
+  File? _livenessFile;
   File? _selfieFile;
   IdCardFront? _frontData;
   IdCardBack? _backData;
   FaceMatchResult? _matchResult;
   EkycStatus? _finalStatus;
+  String? _livenessToken;
 
   @override
   Widget build(BuildContext context) {
@@ -76,7 +79,7 @@ class _IdentityVerificationScreenState
       case _EkycStep.frontIdCard:
         return _CaptureView(
           stepIndex: 1,
-          totalSteps: 3,
+          totalSteps: 4,
           title: 'Chụp MẶT TRƯỚC CCCD',
           subtitle:
               'Đặt CCCD trong khung, đảm bảo rõ ảnh và 4 góc. Tránh lóa sáng.',
@@ -97,7 +100,7 @@ class _IdentityVerificationScreenState
       case _EkycStep.backIdCard:
         return _CaptureView(
           stepIndex: 2,
-          totalSteps: 3,
+          totalSteps: 4,
           title: 'Chụp MẶT SAU CCCD',
           subtitle: 'Đặt mặt sau (có MRZ + ngày cấp) trong khung.',
           icon: Icons.credit_card_outlined,
@@ -111,12 +114,35 @@ class _IdentityVerificationScreenState
           onPickGallery: () => _pickImage(ImageSource.gallery, _setBack),
           onPrimary: _backData == null
               ? _scanBack
-              : () => _setStep(_EkycStep.selfie),
+              : () => _setStep(_EkycStep.liveness),
+        );
+      case _EkycStep.liveness:
+        return _CaptureView(
+          stepIndex: 3,
+          totalSteps: 4,
+          title: 'KIỂM TRA NGƯỜI THẬT',
+          subtitle:
+              'Chụp selfie để xác minh bạn là người thật (chống ảnh/video giả mạo).',
+          icon: Icons.verified_user_outlined,
+          selectedFile: _livenessFile,
+          busy: _busy,
+          errorMessage: _errorMessage,
+          dataPreview: _livenessToken != null
+              ? const _LivenessPreview()
+              : null,
+          primaryLabel: _livenessToken == null ? 'Kiểm tra liveness' : 'Tiếp tục',
+          onTakePhoto: () => _pickImage(
+            ImageSource.camera,
+            _setLiveness,
+            preferFront: true,
+          ),
+          onPickGallery: () => _pickImage(ImageSource.gallery, _setLiveness),
+          onPrimary: _livenessToken == null ? _runLiveness : () => _setStep(_EkycStep.selfie),
         );
       case _EkycStep.selfie:
         return _CaptureView(
-          stepIndex: 3,
-          totalSteps: 3,
+          stepIndex: 4,
+          totalSteps: 4,
           title: 'Chụp KHUÔN MẶT',
           subtitle:
               'Nhìn thẳng camera, không đeo kính/khẩu trang. Hệ thống sẽ so khớp với ảnh trên CCCD.',
@@ -169,8 +195,11 @@ class _IdentityVerificationScreenState
       case _EkycStep.backIdCard:
         _setStep(_EkycStep.frontIdCard);
         break;
-      case _EkycStep.selfie:
+      case _EkycStep.liveness:
         _setStep(_EkycStep.backIdCard);
+        break;
+      case _EkycStep.selfie:
+        _setStep(_EkycStep.liveness);
         break;
       case _EkycStep.intro:
       case _EkycStep.result:
@@ -213,6 +242,12 @@ class _IdentityVerificationScreenState
         _errorMessage = null;
       });
 
+  void _setLiveness(File f) => setState(() {
+        _livenessFile = f;
+        _livenessToken = null;
+        _errorMessage = null;
+      });
+
   void _setSelfie(File f) => setState(() {
         _selfieFile = f;
         _matchResult = null;
@@ -241,6 +276,22 @@ class _IdentityVerificationScreenState
     });
   }
 
+  Future<void> _runLiveness() async {
+    if (_livenessFile == null) {
+      _showError('Chụp selfie để kiểm tra liveness');
+      return;
+    }
+    await _runApi(() async {
+      final result = await EkycService.instance.livenessCheck(_livenessFile!);
+      final passed = result['passed'] == true;
+      if (!passed) {
+        _errorMessage = 'Liveness chưa đạt. Hãy chụp lại với khuôn mặt thật.';
+        return;
+      }
+      _livenessToken = result['livenessToken'] as String? ?? 'live-ok';
+    });
+  }
+
   Future<void> _runFaceMatch() async {
     if (_selfieFile == null || _frontFile == null) {
       _showError('Thiếu ảnh CCCD hoặc selfie');
@@ -259,8 +310,8 @@ class _IdentityVerificationScreenState
   }
 
   Future<void> _submit() async {
-    if (_frontData == null || _matchResult == null) {
-      _showError('Thiếu dữ liệu để submit eKYC');
+    if (_frontData == null || _matchResult == null || _livenessToken == null) {
+      _showError('Thiếu dữ liệu để submit eKYC (cần hoàn tất liveness)');
       return;
     }
     await _runApi(() async {
@@ -272,6 +323,7 @@ class _IdentityVerificationScreenState
             ? _frontData!.address
             : _frontData!.home,
         faceSimilarity: _matchResult!.similarity,
+        livenessToken: _livenessToken!,
       );
       _step = _EkycStep.result;
     });
@@ -608,6 +660,34 @@ class _BackDataPreview extends StatelessWidget {
           _KvRow(label: 'Nơi cấp', value: data.issueLoc),
           if (data.features.isNotEmpty)
             _KvRow(label: 'Đặc điểm', value: data.features),
+        ],
+      ),
+    );
+  }
+}
+
+class _LivenessPreview extends StatelessWidget {
+  const _LivenessPreview();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: AppDecorations.card(),
+      child: const Row(
+        children: [
+          Icon(Icons.verified_user, color: AppColors.trustGreen, size: 20),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Liveness đạt — xác thực người thật thành công',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: AppColors.trustGreen,
+              ),
+            ),
+          ),
         ],
       ),
     );

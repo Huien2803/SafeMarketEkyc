@@ -198,11 +198,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const Divider(height: 32),
                   const Text(
-                    'Backend phải đang chạy ở port 3000',
+                    'Java API: mvn spring-boot:run (port 5214) — không cần Node.js\n'
+                    'Demo: an.nguyen@email.com / 123456 · admin@safemarket.vn / admin123',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 11,
                       color: AppColors.textMuted,
+                      height: 1.4,
                     ),
                   ),
                 ],

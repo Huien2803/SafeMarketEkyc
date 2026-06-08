@@ -24,6 +24,7 @@ class SafeMarketApp extends StatelessWidget {
       title: 'SafeMarket',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
+      themeMode: ThemeMode.light,
       home: const AuthGate(),
       routes: {
         '/login': (_) => const LoginScreen(),
@@ -31,7 +32,12 @@ class SafeMarketApp extends StatelessWidget {
         '/home': (_) => const MarketplaceHomeScreen(),
         '/profile': (_) => const ProfileScreen(),
         '/ekyc': (_) => const IdentityVerificationScreen(),
-        '/product': (_) => const ProductDetailScreen(),
+        '/product': (ctx) {
+          final id = ModalRoute.of(ctx)?.settings.arguments;
+          return ProductDetailScreen(
+            productId: id is int ? id : 1,
+          );
+        },
         '/admin': (_) => const AdminDashboardScreen(),
       },
     );

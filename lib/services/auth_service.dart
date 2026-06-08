@@ -33,7 +33,7 @@ class AuthService extends ChangeNotifier {
 
   String? get accessToken => _accessToken;
   AuthUser? get currentUser => _currentUser;
-  bool get isLoggedIn => _accessToken != null && _currentUser != null;
+  bool get isLoggedIn => _currentUser != null;
 
   /// Đọc token đã lưu từ disk khi app khởi động.
   Future<void> loadFromStorage() async {
@@ -70,23 +70,30 @@ class AuthService extends ChangeNotifier {
     };
 
     final res = await _postJson('/auth/register', body);
-    final auth = AuthResponse.fromJson(res);
-    await _persist(auth);
-    return auth;
+    return _finishAuth(res);
   }
 
   Future<AuthResponse> login({
     required String identifier,
     required String password,
   }) async {
+    // Java API: LoginRequest { email, password }
     final body = <String, dynamic>{
-      'identifier': identifier,
+      'email': identifier.trim(),
       'password': password,
     };
     final res = await _postJson('/auth/login', body);
-    final auth = AuthResponse.fromJson(res);
-    await _persist(auth);
-    return auth;
+    return _finishAuth(res);
+  }
+
+  Future<AuthResponse> _finishAuth(Map<String, dynamic> res) async {
+    try {
+      final auth = AuthResponse.fromJson(res);
+      await _persist(auth);
+      return auth;
+    } on FormatException catch (e) {
+      throw AuthException(e.message);
+    }
   }
 
   Future<void> logout() async {

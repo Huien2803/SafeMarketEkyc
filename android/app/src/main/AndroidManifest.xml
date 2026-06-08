@@ -37,6 +37,17 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Tat Impeller tren emulator (tranh man hinh den API 36/37) -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
+        <!-- TextureView thay SurfaceView: sua man hinh den tren gphone16k -->
+        <meta-data
+            android:name="io.flutter.embedding.android.RenderMode"
+            android:value="texture" />
+        <meta-data
+            android:name="io.flutter.embedding.android.TransparencyMode"
+            android:value="opaque" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

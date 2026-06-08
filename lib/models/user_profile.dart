@@ -8,6 +8,11 @@ class UserProfile {
     required this.isAdmin,
     required this.createdAt,
     required this.ekyc,
+    this.activeListingCount = 0,
+    this.soldCount = 0,
+    this.boughtCount = 0,
+    this.reviewCount = 0,
+    this.averageRating = 0,
     this.displayName,
     this.location,
     this.avatarUrl,
@@ -25,23 +30,47 @@ class UserProfile {
   final DateTime createdAt;
   final TrustScore? trustScore;
   final EkycSummary ekyc;
+  final int activeListingCount;
+  final int soldCount;
+  final int boughtCount;
+  final int reviewCount;
+  final double averageRating;
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
     return UserProfile(
       userId: (json['userId'] as num).toInt(),
-      email: json['email'] as String,
-      phoneNumber: json['phoneNumber'] as String,
+      email: json['email'] as String? ?? '',
+      phoneNumber: json['phoneNumber'] as String? ?? '',
       displayName: json['displayName'] as String?,
       location: json['location'] as String?,
       avatarUrl: json['avatarUrl'] as String?,
-      accountStatus: json['accountStatus'] as String,
+      accountStatus: json['accountStatus'] as String? ?? 'Active',
       isAdmin: json['isAdmin'] as bool? ?? false,
-      createdAt: DateTime.parse(json['createdAt'] as String),
+      createdAt: _parseDate(json['createdAt']) ?? DateTime.now(),
       trustScore: json['trustScore'] != null
           ? TrustScore.fromJson(json['trustScore'] as Map<String, dynamic>)
           : null,
-      ekyc: EkycSummary.fromJson(json['ekyc'] as Map<String, dynamic>),
+      ekyc: json['ekyc'] != null
+          ? EkycSummary.fromJson(json['ekyc'] as Map<String, dynamic>)
+          : EkycSummary(status: json['kycStatus'] as String? ?? 'Unverified'),
+      activeListingCount: (json['activeListingCount'] as num?)?.toInt() ?? 0,
+      soldCount: (json['soldCount'] as num?)?.toInt() ?? 0,
+      boughtCount: (json['boughtCount'] as num?)?.toInt() ?? 0,
+      reviewCount: (json['reviewCount'] as num?)?.toInt() ?? 0,
+      averageRating: (json['averageRating'] as num?)?.toDouble() ?? 0,
     );
+  }
+
+  static DateTime? _parseDate(dynamic value) {
+    if (value == null) return null;
+    if (value is String && value.isNotEmpty) {
+      try {
+        return DateTime.parse(value);
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
   }
 
   /// 2 ký tự đầu của tên (cho avatar placeholder).
@@ -88,10 +117,10 @@ class TrustScore {
 
   factory TrustScore.fromJson(Map<String, dynamic> json) {
     return TrustScore(
-      currentPoint: (json['currentPoint'] as num).toInt(),
-      maxPoint: (json['maxPoint'] as num).toInt(),
-      rankLevel: json['rankLevel'] as String,
-      updatedAt: DateTime.parse(json['updatedAt'] as String),
+      currentPoint: (json['currentPoint'] as num?)?.toInt() ?? 500,
+      maxPoint: (json['maxPoint'] as num?)?.toInt() ?? 1000,
+      rankLevel: json['rankLevel'] as String? ?? 'Bronze',
+      updatedAt: UserProfile._parseDate(json['updatedAt']) ?? DateTime.now(),
     );
   }
 }
@@ -119,7 +148,7 @@ class EkycSummary {
       fullName: json['fullName'] as String?,
       idNumber: json['idNumber'] as String?,
       verifiedAt: json['verifiedAt'] != null
-          ? DateTime.parse(json['verifiedAt'] as String)
+          ? UserProfile._parseDate(json['verifiedAt'])
           : null,
     );
   }

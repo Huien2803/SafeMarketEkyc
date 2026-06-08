@@ -33,6 +33,42 @@ class _AuthGateState extends State<AuthGate> {
             body: Center(child: CircularProgressIndicator()),
           );
         }
+        if (snapshot.hasError) {
+          return Scaffold(
+            backgroundColor: AppColors.background,
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error_outline, size: 48, color: Colors.orange),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Không tải được phiên đăng nhập.\n${snapshot.error}',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: () {
+                        setState(() {
+                          _initFuture = AuthService.instance.loadFromStorage();
+                        });
+                      },
+                      child: const Text('Thử lại'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pushReplacement(
+                        MaterialPageRoute(builder: (_) => const LoginScreen()),
+                      ),
+                      child: const Text('Vào màn đăng nhập'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
         return AnimatedBuilder(
           animation: AuthService.instance,
           builder: (_, _) {

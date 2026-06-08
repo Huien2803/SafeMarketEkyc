@@ -4,7 +4,12 @@ import 'package:safemarket_app/core/theme/app_colors.dart';
 import 'package:safemarket_app/models/user_profile.dart';
 import 'package:safemarket_app/screens/auth/login_screen.dart';
 import 'package:safemarket_app/screens/identity_verification.dart';
+import 'package:safemarket_app/screens/admin_dashboard.dart';
+import 'package:safemarket_app/screens/notifications_screen.dart';
 import 'package:safemarket_app/services/auth_service.dart';
+import 'package:safemarket_app/models/sold_listing.dart';
+import 'package:safemarket_app/screens/order_detail_screen.dart';
+import 'package:safemarket_app/services/order_service.dart';
 import 'package:safemarket_app/services/user_service.dart';
 import 'package:safemarket_app/widgets/verified_badge.dart';
 
@@ -24,18 +29,29 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   late Future<UserProfile> _profileFuture;
+  late Future<List<SoldListing>> _soldFuture;
 
   @override
   void initState() {
     super.initState();
-    _profileFuture = UserService.instance.getMyProfile();
+    _profileFuture = _loadProfile();
+    _soldFuture = OrderService.instance.getSoldProducts();
+  }
+
+  Future<UserProfile> _loadProfile() {
+    return UserService.instance.getMyProfile().catchError((Object e) {
+      throw e is AuthException ? e : AuthException(e.toString());
+    });
   }
 
   Future<void> _refresh() async {
     setState(() {
-      _profileFuture = UserService.instance.getMyProfile();
+      _profileFuture = _loadProfile();
+      _soldFuture = OrderService.instance.getSoldProducts();
     });
-    await _profileFuture;
+    try {
+      await _profileFuture;
+    } catch (_) {}
   }
 
   /// Nếu được nhúng làm tab (có callback) -> chuyển tab về Home.
@@ -129,7 +145,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           const Spacer(),
                           IconButton(
                             icon: const Icon(Icons.notifications_outlined),
-                            onPressed: () {},
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) =>
+                                      const NotificationsScreen(),
+                                ),
+                              );
+                            },
                           ),
                           IconButton(
                             tooltip: 'Đăng xuất',
@@ -163,13 +187,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                           const SizedBox(height: 12),
                           _EkycTile(ekyc: profile.ekyc),
+                          if (profile.isAdmin || AuthService.instance.currentUser?.isAdmin == true) ...[
+                            const SizedBox(height: 10),
+                            ListTile(
+                              tileColor: AppColors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              leading: const Icon(Icons.admin_panel_settings,
+                                  color: AppColors.primary),
+                              title: const Text('Bảng quản trị SafeAdmin'),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute<void>(
+                                    builder: (_) =>
+                                        const AdminDashboardScreen(),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
                           const SizedBox(height: 10),
-                          const _VerificationTile(
+                          _VerificationTile(
                             icon: Icons.shopping_bag_outlined,
                             iconColor: AppColors.primary,
                             title: 'Giao dịch thành công',
-                            subtitle: 'Chưa có giao dịch',
-                            trailing: Icon(
+                            subtitle: profile.soldCount + profile.boughtCount > 0
+                                ? 'Đã bán ${profile.soldCount} • Đã mua ${profile.boughtCount}'
+                                : 'Chưa có giao dịch hoàn tất',
+                            trailing: const Icon(
                               Icons.chevron_right,
                               color: AppColors.textMuted,
                             ),
@@ -178,9 +226,65 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              const Text(
-                                'ĐANG RAO BÁN (0)',
-                                style: TextStyle(
+                              FutureBuilder<List<SoldListing>>(
+                                future: _soldFuture,
+                                builder: (context, soldSnap) {
+                                  final count = soldSnap.data?.length ?? 0;
+                                  return Text(
+                                    'ĐÃ ĐĂNG BÁN ($count)',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.textPrimary,
+                                    ),
+                                  );
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          FutureBuilder<List<SoldListing>>(
+                            future: _soldFuture,
+                            builder: (context, soldSnap) {
+                              if (soldSnap.connectionState ==
+                                  ConnectionState.waiting) {
+                                return const Padding(
+                                  padding: EdgeInsets.all(24),
+                                  child: Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                );
+                              }
+                              final items = soldSnap.data ?? [];
+                              if (items.isEmpty) {
+                                return Container(
+                                  padding: const EdgeInsets.all(20),
+                                  decoration: AppDecorations.card(),
+                                  child: const Center(
+                                    child: Text(
+                                      'Bạn chưa đăng sản phẩm nào',
+                                      style: TextStyle(
+                                        color: AppColors.textMuted,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }
+                              return Column(
+                                children: items
+                                    .map((s) => _SoldListingTile(item: s))
+                                    .toList(),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 24),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'ĐANG RAO BÁN (${profile.activeListingCount})',
+                                style: const TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w700,
                                   color: AppColors.textPrimary,
@@ -196,9 +300,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           Container(
                             padding: const EdgeInsets.all(20),
                             decoration: AppDecorations.card(),
-                            child: const Center(
+                            child: Center(
                               child: Text(
-                                'Bạn chưa đăng tin nào',
+                                profile.activeListingCount == 0
+                                    ? 'Bạn chưa đăng tin nào'
+                                    : 'Có ${profile.activeListingCount} tin đang bán',
                                 style: TextStyle(
                                   color: AppColors.textMuted,
                                 ),
@@ -408,13 +514,75 @@ class _StatsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      children: const [
-        Expanded(child: _StatCard(value: '0', label: 'ĐÃ BÁN')),
-        SizedBox(width: 10),
-        Expanded(child: _StatCard(value: '0', label: 'ĐÃ MUA')),
-        SizedBox(width: 10),
-        Expanded(child: _StatCard(value: '—', label: 'ĐÁNH GIÁ')),
+      children: [
+        Expanded(
+          child: _StatCard(
+            value: '${profile.soldCount}',
+            label: 'ĐÃ BÁN',
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _StatCard(
+            value: '${profile.boughtCount}',
+            label: 'ĐÃ MUA',
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _StatCard(
+            value: profile.reviewCount > 0
+                ? '${profile.averageRating.toStringAsFixed(1)}★'
+                : '—',
+            label: 'ĐÁNH GIÁ (${profile.reviewCount})',
+          ),
+        ),
       ],
+    );
+  }
+}
+
+class _SoldListingTile extends StatelessWidget {
+  const _SoldListingTile({required this.item});
+  final SoldListing item;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasBuyer = item.hasBuyer;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: AppDecorations.card(),
+      child: ListTile(
+        leading: Icon(
+          hasBuyer ? Icons.shopping_cart_checkout : Icons.storefront_outlined,
+          color: hasBuyer ? AppColors.trustGreen : AppColors.textMuted,
+        ),
+        title: Text(
+          item.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(
+          '${item.priceFormatted} • ${item.buyerStatusLabel}',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: hasBuyer && item.orderId != null
+            ? const Icon(Icons.chevron_right)
+            : null,
+        onTap: item.orderId != null
+            ? () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        OrderDetailScreen(orderId: item.orderId!),
+                  ),
+                );
+              }
+            : null,
+      ),
     );
   }
 }

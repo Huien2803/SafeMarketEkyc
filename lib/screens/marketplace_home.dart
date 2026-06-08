@@ -1,8 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:safemarket_app/core/constants/app_decorations.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
+import 'package:safemarket_app/models/favorite_product.dart';
+import 'package:safemarket_app/models/product.dart';
+import 'package:safemarket_app/services/product_service.dart';
+import 'package:safemarket_app/screens/favorites_tab.dart';
+import 'package:safemarket_app/screens/notifications_screen.dart';
 import 'package:safemarket_app/screens/product_detail.dart';
+import 'package:safemarket_app/screens/chat_list_screen.dart';
 import 'package:safemarket_app/screens/profile_screen.dart';
+import 'package:safemarket_app/services/favorites_service.dart';
+import 'package:safemarket_app/services/notification_service.dart';
+import 'package:safemarket_app/screens/post_product_screen.dart';
+import 'package:safemarket_app/services/auth_service.dart';
+import 'package:safemarket_app/services/user_service.dart';
+import 'package:safemarket_app/widgets/product_thumbnail.dart';
+import 'package:safemarket_app/widgets/trust_gauge.dart';
 
 /// Màn hình "shell" của app sau khi đăng nhập.
 ///
@@ -22,6 +35,7 @@ class MarketplaceHomeScreen extends StatefulWidget {
 
 class _MarketplaceHomeScreenState extends State<MarketplaceHomeScreen> {
   int _bottomIndex = 0;
+  final _homeTabKey = GlobalKey<_HomeTabState>();
 
   void _switchTab(int index) {
     if (_bottomIndex == index) return;
@@ -29,6 +43,24 @@ class _MarketplaceHomeScreenState extends State<MarketplaceHomeScreen> {
   }
 
   void _goHome() => _switchTab(0);
+
+  Future<void> _openPostProduct() async {
+    if (!AuthService.instance.isLoggedIn) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Vui lòng đăng nhập để đăng bán sản phẩm')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    final posted = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const PostProductScreen()),
+    );
+    if (posted == true) {
+      _homeTabKey.currentState?.reloadProducts();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -49,24 +81,16 @@ class _MarketplaceHomeScreenState extends State<MarketplaceHomeScreen> {
           child: IndexedStack(
             index: _bottomIndex,
             children: [
-              const _HomeTab(),
-              const _PlaceholderTab(
-                icon: Icons.favorite_border,
-                title: 'Yêu thích',
-                subtitle: 'Danh sách sản phẩm bạn đã lưu sẽ hiện ở đây.',
-              ),
-              const _PlaceholderTab(
-                icon: Icons.chat_bubble_outline,
-                title: 'Tin nhắn',
-                subtitle: 'Hội thoại với người bán sẽ hiện ở đây.',
-              ),
+              _HomeTab(key: _homeTabKey),
+              const FavoritesTab(),
+              const _ChatTab(),
               ProfileScreen(onBack: _goHome),
             ],
           ),
         ),
         floatingActionButton: _bottomIndex == 0
             ? FloatingActionButton(
-                onPressed: () {},
+                onPressed: _openPostProduct,
                 backgroundColor: AppColors.primary,
                 elevation: 6,
                 shape: const CircleBorder(),
@@ -122,7 +146,7 @@ class _MarketplaceHomeScreenState extends State<MarketplaceHomeScreen> {
 ///  Tab 1: HOME (Marketplace) - nội dung cũ
 /// ====================================================================
 class _HomeTab extends StatefulWidget {
-  const _HomeTab();
+  const _HomeTab({super.key});
 
   @override
   State<_HomeTab> createState() => _HomeTabState();
@@ -130,55 +154,92 @@ class _HomeTab extends StatefulWidget {
 
 class _HomeTabState extends State<_HomeTab>
     with AutomaticKeepAliveClientMixin {
-  int _selectedCategory = 0;
+  int _selectedCategoryId = 0;
+  bool _verifiedOnly = false;
+  final _searchCtrl = TextEditingController();
+  List<ProductCategory> _apiCategories = [];
+  List<ProductListItem> _products = [];
+  bool _loading = true;
+  String? _error;
+  int? _myTrustScore;
+  String? _myRankLabel;
 
-  static const _categories = [
-    _CategoryItem('TẤT CẢ', Icons.auto_awesome, isAll: true),
-    _CategoryItem('ĐIỆN TỬ', Icons.smartphone),
-    _CategoryItem('THỜI TRANG', Icons.checkroom),
-    _CategoryItem('ĐỒ GIA DỤNG', Icons.home_outlined),
-    _CategoryItem('XE CỘ', Icons.directions_car_outlined),
-    _CategoryItem('SÁCH', Icons.menu_book_outlined),
-  ];
+  void reloadProducts() => _loadAll();
 
-  static const _products = [
-    _ProductData(
-      name: 'iPhone 13 Pro Max - 256GB',
-      price: '15.500.000đ',
-      seller: 'An Nguyễn',
-      trustScore: 850,
-      location: 'Quận 1',
-      time: '2 giờ trước',
-      icon: Icons.phone_iphone,
-    ),
-    _ProductData(
-      name: 'Sony A7 III Body',
-      price: '22.000.000đ',
-      seller: 'Minh Trần',
-      trustScore: 720,
-      location: 'Quận 3',
-      time: '5 giờ trước',
-      icon: Icons.camera_alt_outlined,
-    ),
-    _ProductData(
-      name: 'MacBook Pro M1 2020',
-      price: '18.900.000đ',
-      seller: 'Hùng Lê',
-      trustScore: 910,
-      location: 'Thủ Đức',
-      time: '1 ngày trước',
-      icon: Icons.laptop_mac,
-    ),
-    _ProductData(
-      name: 'AirPods Pro 2',
-      price: '3.200.000đ',
-      seller: 'Lan Phạm',
-      trustScore: 680,
-      location: 'Quận 7',
-      time: '3 giờ trước',
-      icon: Icons.headphones,
-    ),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    FavoritesService.instance.load();
+    NotificationService.instance.load();
+    _loadAll();
+    _loadTrustScore();
+  }
+
+  Future<void> _loadTrustScore() async {
+    if (!AuthService.instance.isLoggedIn) return;
+    try {
+      final profile = await UserService.instance.getMyProfile();
+      if (!mounted) return;
+      setState(() {
+        _myTrustScore = profile.trustScore?.currentPoint;
+        _myRankLabel = profile.trustScore?.rankLabel;
+      });
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _openNotifications() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => const NotificationsScreen(),
+      ),
+    );
+  }
+
+  Future<void> _loadAll() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final cats = await ProductService.instance.getCategories();
+      final products = await ProductService.instance.getProducts(
+        categoryId: _selectedCategoryId == 0 ? null : _selectedCategoryId,
+        search: _searchCtrl.text,
+        verifiedOnly: _verifiedOnly,
+      );
+      if (!mounted) return;
+      setState(() {
+        _apiCategories = cats;
+        _products = products;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  List<_CategoryItem> get _categories {
+    final list = <_CategoryItem>[
+      const _CategoryItem('TẤT CẢ', Icons.auto_awesome, isAll: true),
+    ];
+    for (final c in _apiCategories) {
+      list.add(
+        _CategoryItem(c.name, Icons.category_outlined, id: c.categoryId),
+      );
+    }
+    return list;
+  }
 
   @override
   bool get wantKeepAlive => true;
@@ -187,41 +248,87 @@ class _HomeTabState extends State<_HomeTab>
   Widget build(BuildContext context) {
     super.build(context);
     return SafeArea(
-      child: CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(child: _buildHeader()),
-          SliverToBoxAdapter(child: _buildSearchRow()),
-          SliverToBoxAdapter(child: _buildCategories()),
-          SliverToBoxAdapter(child: _buildSectionTitle()),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
-            sliver: SliverGrid(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 0.72,
+      child: RefreshIndicator(
+        onRefresh: _loadAll,
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(child: _buildHeader()),
+            if (_myTrustScore != null)
+              SliverToBoxAdapter(
+                child: TrustGaugeCard(
+                  score: _myTrustScore!,
+                  rankLabel: _myRankLabel,
+                ),
               ),
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final product = _products[index % _products.length];
-                  return _ProductCard(
-                    product: product,
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute<void>(
-                          builder: (_) => const ProductDetailScreen(),
+            SliverToBoxAdapter(child: _buildSearchRow()),
+            SliverToBoxAdapter(child: _buildCategories()),
+            SliverToBoxAdapter(child: _buildSectionTitle()),
+            if (_loading)
+              const SliverFillRemaining(
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_error != null)
+              SliverFillRemaining(
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.cloud_off, size: 48),
+                        const SizedBox(height: 12),
+                        Text(_error!, textAlign: TextAlign.center),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Chạy Java API (port 5214) rồi thử lại',
+                          style: TextStyle(color: AppColors.textSecondary),
                         ),
+                        FilledButton(
+                          onPressed: _loadAll,
+                          child: const Text('Thử lại'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            else if (_products.isEmpty)
+              const SliverFillRemaining(
+                child: Center(child: Text('Không có sản phẩm')),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+                sliver: SliverGrid(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                    childAspectRatio: 0.72,
+                  ),
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      final product = _products[index];
+                      return _ProductCard(
+                        product: product,
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => ProductDetailScreen(
+                                productId: product.id,
+                              ),
+                            ),
+                          );
+                        },
                       );
                     },
-                  );
-                },
-                childCount: _products.length,
+                    childCount: _products.length,
+                  ),
+                ),
               ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -253,7 +360,7 @@ class _HomeTabState extends State<_HomeTab>
             children: [
               IconButton(
                 icon: const Icon(Icons.notifications_outlined),
-                onPressed: () {},
+                onPressed: _openNotifications,
               ),
               Positioned(
                 right: 12,
@@ -277,10 +384,29 @@ class _HomeTabState extends State<_HomeTab>
   Widget _buildSearchRow() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
+      child: Column(
+        children: [
+          Row(
+            children: [
+              FilterChip(
+                label: const Text('Chỉ người đã eKYC'),
+                selected: _verifiedOnly,
+                onSelected: (v) {
+                  setState(() => _verifiedOnly = v);
+                  _loadAll();
+                },
+                selectedColor: AppColors.primary.withValues(alpha: 0.15),
+                checkmarkColor: AppColors.primary,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
         children: [
           Expanded(
             child: TextField(
+              controller: _searchCtrl,
+              onSubmitted: (_) => _loadAll(),
               decoration: InputDecoration(
                 hintText: 'Tìm sản phẩm, người bán uy tín',
                 prefixIcon: const Icon(Icons.search, color: AppColors.textMuted),
@@ -298,15 +424,17 @@ class _HomeTabState extends State<_HomeTab>
             color: AppColors.primary,
             borderRadius: BorderRadius.circular(14),
             child: InkWell(
-              onTap: () {},
+              onTap: _loadAll,
               borderRadius: BorderRadius.circular(14),
               child: const SizedBox(
                 width: 48,
                 height: 48,
-                child: Icon(Icons.tune, color: AppColors.white),
+                child: Icon(Icons.search, color: AppColors.white),
               ),
             ),
           ),
+        ],
+      ),
         ],
       ),
     );
@@ -321,9 +449,12 @@ class _HomeTabState extends State<_HomeTab>
         itemCount: _categories.length,
         itemBuilder: (context, index) {
           final cat = _categories[index];
-          final selected = _selectedCategory == index;
+          final selected = (cat.id ?? 0) == _selectedCategoryId;
           return GestureDetector(
-            onTap: () => setState(() => _selectedCategory = index),
+            onTap: () {
+              setState(() => _selectedCategoryId = cat.id ?? 0);
+              _loadAll();
+            },
             child: Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Column(
@@ -454,38 +585,61 @@ class _PlaceholderTab extends StatelessWidget {
 }
 
 class _CategoryItem {
-  const _CategoryItem(this.label, this.icon, {this.isAll = false});
+  const _CategoryItem(this.label, this.icon, {this.isAll = false, this.id});
   final String label;
   final IconData icon;
   final bool isAll;
+  final int? id;
 }
 
-class _ProductData {
-  const _ProductData({
-    required this.name,
-    required this.price,
-    required this.seller,
-    required this.trustScore,
-    required this.location,
-    required this.time,
-    required this.icon,
-  });
+Color _conditionColor(int pct) {
+  if (pct >= 85) return AppColors.trustGreen;
+  if (pct >= 70) return const Color(0xFFD97706);
+  return const Color(0xFFDC2626);
+}
 
-  final String name;
-  final String price;
-  final String seller;
-  final int trustScore;
-  final String location;
-  final String time;
-  final IconData icon;
+/// Badge % độ bền góc ảnh sản phẩm.
+class _ConditionBadge extends StatelessWidget {
+  const _ConditionBadge({required this.pct});
+
+  final int pct;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _conditionColor(pct);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        '$pct%',
+        style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: AppColors.white,
+        ),
+      ),
+    );
+  }
 }
 
 /// Thẻ sản phẩm trong grid 2 cột.
 class _ProductCard extends StatelessWidget {
   const _ProductCard({required this.product, required this.onTap});
 
-  final _ProductData product;
+  final ProductListItem product;
   final VoidCallback onTap;
+
+  FavoriteProduct get _favorite => FavoriteProduct(
+        id: '${product.id}',
+        name: product.title,
+        price: product.priceFormatted,
+        seller: product.sellerName,
+        location: product.location,
+        trustScore: product.trustScore,
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -500,28 +654,53 @@ class _ProductCard extends StatelessWidget {
               flex: 3,
               child: Stack(
                 children: [
-                  Container(
-                    width: double.infinity,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFF3F4F6),
-                      borderRadius: BorderRadius.vertical(
+                  ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(16),
+                    ),
+                    child: ProductThumbnail(
+                      thumbnailUrl: product.thumbnailUrl,
+                      iconSize: 48,
+                      borderRadius: const BorderRadius.vertical(
                         top: Radius.circular(16),
                       ),
                     ),
-                    child: Icon(product.icon,
-                        size: 48, color: AppColors.textMuted),
+                  ),
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: _ConditionBadge(pct: product.conditionPct),
                   ),
                   Positioned(
                     top: 8,
                     right: 8,
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(
-                        color: AppColors.white,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.favorite_border,
-                          size: 18, color: AppColors.textMuted),
+                    child: ListenableBuilder(
+                      listenable: FavoritesService.instance,
+                      builder: (context, _) {
+                        final liked =
+                            FavoritesService.instance
+                                .isFavorite('${product.id}');
+                        return GestureDetector(
+                          onTap: () => FavoritesService.instance
+                              .toggle(_favorite),
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: const BoxDecoration(
+                              color: AppColors.white,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              liked
+                                  ? Icons.favorite
+                                  : Icons.favorite_border,
+                              size: 18,
+                              color: liked
+                                  ? AppColors.primary
+                                  : AppColors.textMuted,
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
                 ],
@@ -535,7 +714,7 @@ class _ProductCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      product.price,
+                      product.priceFormatted,
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w800,
@@ -544,7 +723,7 @@ class _ProductCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      product.name,
+                      product.title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -554,12 +733,21 @@ class _ProductCard extends StatelessWidget {
                         height: 1.2,
                       ),
                     ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Độ bền ${product.conditionPct}%',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: _conditionColor(product.conditionPct),
+                      ),
+                    ),
                     const Spacer(),
                     Row(
                       children: [
                         Flexible(
                           child: Text(
-                            product.seller,
+                            product.sellerName,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
@@ -568,8 +756,9 @@ class _ProductCard extends StatelessWidget {
                             ),
                           ),
                         ),
-                        const Icon(Icons.verified,
-                            size: 14, color: AppColors.primary),
+                        if (product.sellerVerified)
+                          const Icon(Icons.verified,
+                              size: 14, color: AppColors.primary),
                       ],
                     ),
                     const SizedBox(height: 4),
@@ -585,7 +774,7 @@ class _ProductCard extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          '${product.location} · ${product.time}',
+                          product.location,
                           style: const TextStyle(
                             fontSize: 9,
                             color: AppColors.textMuted,
@@ -600,6 +789,33 @@ class _ProductCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Tab tin nhắn — danh sách hội thoại với người bán.
+class _ChatTab extends StatelessWidget {
+  const _ChatTab();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+          child: Text(
+            'TIN NHẮN',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1,
+              color: AppColors.textMuted,
+            ),
+          ),
+        ),
+        const Expanded(child: ChatListScreen()),
+      ],
     );
   }
 }

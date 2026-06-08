@@ -28,6 +28,10 @@ class EkycService {
     return IdCardBack.fromJson(json);
   }
 
+  Future<Map<String, dynamic>> livenessCheck(File selfie) async {
+    return _uploadSingle('/ekyc/liveness-check', 'selfie', selfie);
+  }
+
   Future<FaceMatchResult> faceMatch({
     required File idCard,
     required File selfie,
@@ -48,6 +52,7 @@ class EkycService {
     required String dob,
     required String address,
     required double faceSimilarity,
+    required String livenessToken,
   }) async {
     final token = _requireToken();
     final uri = Uri.parse('${ApiConfig.baseUrl}/ekyc/submit');
@@ -64,6 +69,7 @@ class EkycService {
             'dob': dob,
             'address': address,
             'faceSimilarity': faceSimilarity,
+            'livenessToken': livenessToken,
           }),
         )
         .timeout(ApiConfig.timeout);

@@ -1,6 +1,11 @@
 -- =========================================================================
 -- ĐỒ ÁN KHÓA LUẬN: HỆ THỐNG MARKETPLACE ĐỒ CŨ AN TOÀN (SAFEMARKET)
--- File: eKYC Market.sql
+-- File: eKYC Market.sql (BẢN GỐC — tham khảo khóa luận)
+--
+-- KHUYÊN DÙNG: database/01-setup-schema.sql + 02-seed-demo.sql + 03-create-app-user.sql
+-- (idempotent — chạy lại không báo "already exists")
+-- Chi tiết: database/HUONG-DAN-DATABASE.md
+--
 -- Phiên bản: 2.0 (bổ sung Admin, Moderation, Profile, ảnh SP, ràng buộc)
 --
 -- THAY ĐỔI SO VỚI BẢN CŨ:
@@ -14,15 +19,15 @@
 --   + Dữ liệu mẫu Categories; phần TEST tách rõ
 -- =========================================================================
 
-USE master;
-GO
+--USE master;
+--GO
 
-IF EXISTS (SELECT name FROM sys.databases WHERE name = N'SafeMarketDB')
-BEGIN
-    ALTER DATABASE SafeMarketDB SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-    DROP DATABASE SafeMarketDB;
-END
-GO
+--IF EXISTS (SELECT name FROM sys.databases WHERE name = N'SafeMarketDB')
+--BEGIN
+--    ALTER DATABASE SafeMarketDB SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+--    DROP DATABASE SafeMarketDB;
+--END
+--GO
 
 CREATE DATABASE SafeMarketDB;
 GO
@@ -394,7 +399,7 @@ INSERT INTO [Market].[Categories] ([name], [slug]) VALUES
     (N'Sách', 'sach');
 GO
 
--- Admin hệ thống (đăng nhập SafeAdmin — mật khẩu hash thật do backend tạo)
+-- Admin (NestJS backend: mật khẩu demo admin123 khi password_hash = HASH_REPLACE_IN_PRODUCTION)
 INSERT INTO [Identity].[Users] (
     [phone_number], [email], [password_hash],
     [display_name], [location], [kyc_status], [account_status], [is_admin]
@@ -404,7 +409,7 @@ INSERT INTO [Identity].[Users] (
 );
 GO
 
--- User demo khớp UI Flutter (Nguyễn Văn An — trigger tự tạo Scores 500)
+-- User demo (NestJS: mật khẩu 123456 khi password_hash = HASH_DEMO; trigger tạo Scores 500)
 INSERT INTO [Identity].[Users] (
     [phone_number], [email], [password_hash],
     [display_name], [location], [kyc_status], [account_status]
@@ -501,3 +506,21 @@ SELECT * FROM [Reputation].[Scores];  -- Mong đợi: 250, Bronze
 
 PRINT N'SafeMarketDB v2.0 — tạo schema, trigger, seed và view Admin hoàn tất.';
 GO
+
+
+USE SafeMarketDB;
+GO
+
+SELECT 
+    [user_id],
+    [display_name],
+    [email],
+    [phone_number],
+    [password_hash],
+    [account_status],
+    [is_admin]
+FROM [Identity].[Users];
+
+
+
+

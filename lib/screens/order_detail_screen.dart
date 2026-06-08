@@ -1,0 +1,427 @@
+import 'package:flutter/material.dart';
+import 'package:safemarket_app/core/constants/app_decorations.dart';
+import 'package:safemarket_app/core/theme/app_colors.dart';
+import 'package:safemarket_app/models/order.dart';
+import 'package:safemarket_app/screens/chat_screen.dart';
+import 'package:safemarket_app/services/auth_service.dart';
+import 'package:safemarket_app/services/chat_service.dart';
+import 'package:safemarket_app/services/order_service.dart';
+import 'package:safemarket_app/services/review_service.dart';
+
+class OrderDetailScreen extends StatefulWidget {
+  const OrderDetailScreen({super.key, required this.orderId});
+
+  final int orderId;
+
+  @override
+  State<OrderDetailScreen> createState() => _OrderDetailScreenState();
+}
+
+class _OrderDetailScreenState extends State<OrderDetailScreen> {
+  late Future<OrderItem> _future;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  void _reload() => setState(() {
+        _future = OrderService.instance.getOrder(widget.orderId);
+      });
+
+  int? get _myId => AuthService.instance.currentUser?.userId;
+
+  bool _isBuyer(OrderItem o) => _myId == o.buyerId;
+  bool _isSeller(OrderItem o) => _myId == o.sellerId;
+
+  Future<void> _openChat(OrderItem o) async {
+    final sellerId = o.sellerId;
+    try {
+      final threadId = await ChatService.instance.openThread(
+        sellerId: sellerId,
+        productId: o.productId,
+        orderId: o.orderId,
+      );
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => ChatScreen(
+            threadId: threadId,
+            peerName: o.sellerName,
+            subtitle: o.productTitle,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    }
+  }
+
+  Future<void> _showReviewDialog(OrderItem o) async {
+    int rating = 5;
+    final commentCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('Đánh giá giao dịch'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(5, (i) {
+                  final star = i + 1;
+                  return IconButton(
+                    onPressed: () => setLocal(() => rating = star),
+                    icon: Icon(
+                      star <= rating ? Icons.star : Icons.star_border,
+                      color: Colors.amber,
+                    ),
+                  );
+                }),
+              ),
+              TextField(
+                controller: commentCtrl,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  hintText: 'Nhận xét (tuỳ chọn)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Huỷ'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Gửi đánh giá'),
+            ),
+          ],
+        ),
+      ),
+    );
+    final comment = commentCtrl.text.trim();
+    commentCtrl.dispose();
+    if (ok != true || !mounted) return;
+    await _run(() async {
+      await ReviewService.instance.submitReview(
+        orderId: o.orderId,
+        rating: rating,
+        comment: comment.isEmpty ? null : comment,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cảm ơn bạn đã đánh giá!')),
+        );
+      }
+    });
+  }
+
+  Future<void> _run(Future<void> Function() action) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await action();
+      _reload();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: const Text('Chi tiết đơn hàng'),
+        backgroundColor: AppColors.white,
+        foregroundColor: AppColors.textPrimary,
+        elevation: 0,
+      ),
+      body: FutureBuilder<OrderItem>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError || !snapshot.hasData) {
+            return Center(child: Text('${snapshot.error ?? "Lỗi"}'));
+          }
+          final o = snapshot.data!;
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: AppDecorations.card(),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        o.productTitle,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        o.productPriceFormatted,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      _InfoRow('Mã đơn', '#${o.orderId}'),
+                      _InfoRow('Trạng thái', o.statusLabel),
+                      _InfoRow('Phương thức', o.methodSummary),
+                      _InfoRow('Người bán', o.sellerName),
+                      _InfoRow('Người mua', o.buyerName),
+                      if (o.escrowStatus != null)
+                        _InfoRow('Escrow', o.escrowLabel),
+                      _InfoRow(o.addressLabel, o.shippingAddress),
+                      if (o.disputeNote != null && o.disputeNote!.isNotEmpty)
+                        _InfoRow('Ghi chú khiếu nại', o.disputeNote!),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (o.isShipOrder && o.orderStatus == 'Pending')
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.warningBg,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text(
+                      'Bước 1: Người mua chuyển khoản qua chat\n'
+                      'Bước 2: Người bán xác nhận đã nhận tiền\n'
+                      'Bước 3: Giao ship → khách xác nhận nhận hàng',
+                      style: TextStyle(fontSize: 13, height: 1.45),
+                    ),
+                  ),
+                if (o.isDirectOrder && o.orderStatus == 'Pending')
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.warningBg,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text(
+                      'Hẹn gặp tại địa điểm đã chọn.\n'
+                      'Khách trả tiền mặt khi nhận hàng.\n'
+                      'Người bán xác nhận giao xong → khách xác nhận nhận hàng.',
+                      style: TextStyle(fontSize: 13, height: 1.45),
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: _busy ? null : () => _openChat(o),
+                  icon: const Icon(Icons.chat_bubble_outline),
+                  label: const Text('Chat trực tiếp với chủ bán'),
+                ),
+                const SizedBox(height: 12),
+                if (_isSeller(o) && o.isShipOrder && o.orderStatus == 'Pending')
+                  FilledButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () => _run(() async {
+                              await OrderService.instance
+                                  .markPaymentReceived(o.orderId);
+                            }),
+                    icon: const Icon(Icons.account_balance_outlined),
+                    label: const Text('Đã nhận chuyển khoản'),
+                  ),
+                if (_isSeller(o) &&
+                    o.isShipOrder &&
+                    o.orderStatus == 'Paid') ...[
+                  const SizedBox(height: 8),
+                  FilledButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () => _run(() async {
+                              await OrderService.instance.markShipped(o.orderId);
+                            }),
+                    icon: const Icon(Icons.local_shipping_outlined),
+                    label: const Text('Đã giao ship'),
+                  ),
+                ],
+                if (_isSeller(o) && o.isDirectOrder && o.orderStatus == 'Pending')
+                  FilledButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () => _run(() async {
+                              await OrderService.instance
+                                  .markDirectHandover(o.orderId);
+                            }),
+                    icon: const Icon(Icons.handshake_outlined),
+                    label: const Text('Đã giao trực tiếp & nhận tiền mặt'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.trustGreen,
+                    ),
+                  ),
+                if (_isBuyer(o) &&
+                    ((o.isShipOrder &&
+                            (o.orderStatus == 'Paid' ||
+                                o.orderStatus == 'Shipped')) ||
+                        (o.isDirectOrder && o.orderStatus == 'Paid'))) ...[
+                  FilledButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () => _run(() async {
+                              await OrderService.instance
+                                  .markCompleted(o.orderId);
+                            }),
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text('Đã nhận hàng — hoàn tất'),
+                  ),
+                  if (o.isShipOrder) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _busy
+                          ? null
+                          : () => _run(() async {
+                                await OrderService.instance.reportDispute(
+                                  orderId: o.orderId,
+                                  type: 'NO_RECEIVE',
+                                  note: 'Người mua báo không nhận được hàng',
+                                );
+                              }),
+                      icon: const Icon(Icons.report_problem_outlined),
+                      label: const Text(
+                          'Không nhận được hàng (trừ điểm người bán)'),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _busy
+                          ? null
+                          : () => _run(() async {
+                                await OrderService.instance.reportDispute(
+                                  orderId: o.orderId,
+                                  type: 'WRONG_DELIVERY',
+                                  note: 'Người mua báo giao hàng sai',
+                                );
+                              }),
+                      icon: const Icon(Icons.warning_amber_outlined),
+                      label:
+                          const Text('Giao hàng sai (trừ điểm người bán)'),
+                    ),
+                  ],
+                ],
+                if (o.orderStatus != 'Completed' &&
+                    o.orderStatus != 'Cancelled' &&
+                    (_isBuyer(o) || _isSeller(o))) ...[
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () => _run(() async {
+                              await OrderService.instance.cancelOrder(
+                                o.orderId,
+                                reason: 'Hủy đơn (có thể bị trừ điểm nếu đã thanh toán)',
+                              );
+                            }),
+                    icon: const Icon(Icons.cancel_outlined),
+                    label: const Text('Hủy đơn hàng'),
+                  ),
+                ],
+                if (o.orderStatus == 'Completed')
+                  FutureBuilder(
+                    future: ReviewService.instance.getOrderReviewStatus(o.orderId),
+                    builder: (context, snap) {
+                      if (!snap.hasData || !snap.data!.canReview) {
+                        return const SizedBox.shrink();
+                      }
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: FilledButton.icon(
+                          onPressed: _busy ? null : () => _showReviewDialog(o),
+                          icon: const Icon(Icons.star_outline),
+                          label: const Text('Đánh giá giao dịch'),
+                        ),
+                      );
+                    },
+                  ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Quy tắc điểm tín nhiệm',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  '• eKYC xong: +50 điểm (người mua & người bán)\n'
+                  '• Giao dịch hoàn tất: +15 (mua), +20 (bán)\n'
+                  '• Người mua không nhận hàng: người bán -80\n'
+                  '• Giao hàng sai: người bán -60\n'
+                  '• Hủy đơn sau thanh toán: -30 điểm',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                    height: 1.5,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  const _InfoRow(this.label, this.value);
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppColors.textMuted,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

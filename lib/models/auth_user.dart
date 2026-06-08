@@ -22,7 +22,7 @@ class AuthUser {
     return AuthUser(
       userId: (json['userId'] as num).toInt(),
       email: json['email'] as String,
-      phoneNumber: json['phoneNumber'] as String,
+      phoneNumber: json['phoneNumber'] as String? ?? '',
       displayName: json['displayName'] as String?,
       kycStatus: json['kycStatus'] as String? ?? 'Unverified',
       accountStatus: json['accountStatus'] as String? ?? 'Active',
@@ -55,7 +55,25 @@ class AuthResponse {
   final int expiresIn;
   final AuthUser user;
 
+  /// Hỗ trợ JSON Java API `{ success, message, user }` và NestJS `{ accessToken, user }`.
   factory AuthResponse.fromJson(Map<String, dynamic> json) {
+    if (json.containsKey('success')) {
+      final ok = json['success'] as bool? ?? false;
+      if (!ok) {
+        throw FormatException(json['message'] as String? ?? 'Đăng nhập thất bại');
+      }
+      final userMap = json['user'] as Map<String, dynamic>?;
+      if (userMap == null) {
+        throw const FormatException('Phản hồi API thiếu user');
+      }
+      final user = AuthUser.fromJson(userMap);
+      return AuthResponse(
+        accessToken: 'java-session-${user.userId}',
+        tokenType: 'Session',
+        expiresIn: 0,
+        user: user,
+      );
+    }
     return AuthResponse(
       accessToken: json['accessToken'] as String,
       tokenType: json['tokenType'] as String? ?? 'Bearer',

@@ -62,7 +62,14 @@ export class AuthService {
       throw new UnauthorizedException('Email/SĐT hoặc mật khẩu không đúng');
     }
 
-    const ok = await bcrypt.compare(dto.password, user.passwordHash);
+    let ok = await bcrypt.compare(dto.password, user.passwordHash);
+    // Hỗ trợ mật khẩu demo từ eKYC Market.sql (HASH_DEMO / HASH_REPLACE_IN_PRODUCTION)
+    if (!ok) {
+      ok =
+        (user.passwordHash === 'HASH_DEMO' && dto.password === '123456') ||
+        (user.passwordHash === 'HASH_REPLACE_IN_PRODUCTION' &&
+          dto.password === 'admin123');
+    }
     if (!ok) {
       throw new UnauthorizedException('Email/SĐT hoặc mật khẩu không đúng');
     }

@@ -17,26 +17,35 @@ import { PointLog } from './entities/point-log.entity';
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        type: 'mssql',
-        host: config.get<string>('DB_HOST', 'localhost'),
-        port: parseInt(config.get<string>('DB_PORT', '1433'), 10),
-        username: config.get<string>('DB_USERNAME'),
-        password: config.get<string>('DB_PASSWORD'),
-        database: config.get<string>('DB_DATABASE'),
-        entities: [User, Score, EkycProfile, PointLog],
-        synchronize: false,
-        logging: ['error', 'warn'],
-        options: {
-          encrypt: config.get<string>('DB_ENCRYPT', 'false') === 'true',
-          trustServerCertificate:
-            config.get<string>('DB_TRUST_SERVER_CERT', 'true') === 'true',
-          enableArithAbort: true,
-        },
-        extra: {
-          trustServerCertificate: true,
-        },
-      }),
+      useFactory: (config: ConfigService) => {
+        const host = config.get<string>('DB_HOST', 'localhost');
+        // LocalDB / named instance: không dùng port 1433 (vd. (localdb)\MSSQLLocalDB)
+        const skipPort = host.includes('\\') || host.includes('(');
+        const port = skipPort
+          ? undefined
+          : parseInt(config.get<string>('DB_PORT', '1433'), 10);
+
+        return {
+          type: 'mssql',
+          host,
+          ...(port ? { port } : {}),
+          username: config.get<string>('DB_USERNAME'),
+          password: config.get<string>('DB_PASSWORD'),
+          database: config.get<string>('DB_DATABASE'),
+          entities: [User, Score, EkycProfile, PointLog],
+          synchronize: false,
+          logging: ['error', 'warn'],
+          options: {
+            encrypt: config.get<string>('DB_ENCRYPT', 'false') === 'true',
+            trustServerCertificate:
+              config.get<string>('DB_TRUST_SERVER_CERT', 'true') === 'true',
+            enableArithAbort: true,
+          },
+          extra: {
+            trustServerCertificate: true,
+          },
+        };
+      },
     }),
     AuthModule,
     UsersModule,
