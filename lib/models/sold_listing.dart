@@ -5,6 +5,7 @@ class SoldListing {
     required this.price,
     required this.priceFormatted,
     required this.productStatus,
+    this.thumbnailUrl,
     this.orderId,
     this.orderStatus,
     this.buyerName,
@@ -20,6 +21,11 @@ class SoldListing {
   final String? orderStatus;
   final String? buyerName;
   final bool hasBuyer;
+  final String? thumbnailUrl;
+
+  bool get isSold => productStatus == 'Sold';
+  bool get isActive =>
+      productStatus == 'Available' || productStatus == 'Reserved';
 
   factory SoldListing.fromJson(Map<String, dynamic> json) {
     return SoldListing(
@@ -28,6 +34,7 @@ class SoldListing {
       price: (json['price'] as num).toInt(),
       priceFormatted: json['priceFormatted'] as String? ?? '',
       productStatus: json['productStatus'] as String? ?? 'Available',
+      thumbnailUrl: json['thumbnailUrl'] as String?,
       orderId: (json['orderId'] as num?)?.toInt(),
       orderStatus: json['orderStatus'] as String?,
       buyerName: json['buyerName'] as String?,

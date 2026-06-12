@@ -147,7 +147,26 @@ export class EkycController {
     };
   }
 
-  // ---------- 4. Submit / lưu DB ----------
+  // ---------- 4. Liveness (demo — không cần FPT.AI) ----------
+  @Post('liveness-check')
+  @ApiOperation({ summary: 'Kiểm tra liveness selfie (demo)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { selfie: { type: 'string', format: 'binary' } },
+      required: ['selfie'],
+    },
+  })
+  @UseInterceptors(FileInterceptor('selfie'))
+  livenessCheck(@UploadedFile() _selfie: Express.Multer.File) {
+    return {
+      passed: true,
+      livenessToken: `live-${Date.now()}`,
+    };
+  }
+
+  // ---------- 5. Submit / lưu DB ----------
   @Post('submit')
   @ApiOperation({
     summary: 'Lưu hồ sơ eKYC vào DB và đánh dấu user Verified',
@@ -160,7 +179,7 @@ export class EkycController {
     return this.ekycService.submit(Number(user.userId), dto);
   }
 
-  // ---------- 5. Status ----------
+  // ---------- 6. Status ----------
   @Get('my-status')
   @ApiOperation({ summary: 'Trạng thái eKYC hiện tại của tôi' })
   @ApiResponse({ status: 200, type: EkycStatusDto })

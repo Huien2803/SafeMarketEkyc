@@ -10,9 +10,11 @@ class ChatThread {
     this.orderId,
     required this.createdAt,
     this.lastMessage,
+    this.updatedAt,
+    this.unreadCount = 0,
   });
 
-  final int threadId;
+  final String threadId;
   final int buyerId;
   final int sellerId;
   final String sellerName;
@@ -22,10 +24,12 @@ class ChatThread {
   final int? orderId;
   final DateTime createdAt;
   final String? lastMessage;
+  final DateTime? updatedAt;
+  final int unreadCount;
 
   factory ChatThread.fromJson(Map<String, dynamic> json) {
     return ChatThread(
-      threadId: (json['threadId'] as num).toInt(),
+      threadId: json['threadId']?.toString() ?? '',
       buyerId: (json['buyerId'] as num).toInt(),
       sellerId: (json['sellerId'] as num).toInt(),
       sellerName: json['sellerName'] as String? ?? '',
@@ -33,16 +37,40 @@ class ChatThread {
       productId: (json['productId'] as num?)?.toInt(),
       productTitle: json['productTitle'] as String?,
       orderId: (json['orderId'] as num?)?.toInt(),
-      createdAt: DateTime.parse(json['createdAt'] as String),
+      createdAt: _parseTime(json['createdAt']),
       lastMessage: json['lastMessage'] as String?,
+      updatedAt: json['updatedAt'] != null ? _parseTime(json['updatedAt']) : null,
+      unreadCount: (json['unreadCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  factory ChatThread.fromFirebase(String threadId, Map<dynamic, dynamic> data) {
+    return ChatThread(
+      threadId: threadId,
+      buyerId: (data['buyerId'] as num).toInt(),
+      sellerId: (data['sellerId'] as num).toInt(),
+      sellerName: data['sellerName'] as String? ?? '',
+      buyerName: data['buyerName'] as String? ?? '',
+      productId: (data['productId'] as num?)?.toInt(),
+      productTitle: data['productTitle'] as String?,
+      orderId: (data['orderId'] as num?)?.toInt(),
+      createdAt: _parseTime(data['createdAt']),
+      lastMessage: data['lastMessage'] as String?,
+      updatedAt: data['updatedAt'] != null ? _parseTime(data['updatedAt']) : null,
+      unreadCount: (data['unreadCount'] as num?)?.toInt() ?? 0,
     );
   }
 
   String peerName(int myUserId) =>
       myUserId == buyerId ? sellerName : buyerName;
+
+  static DateTime _parseTime(dynamic v) {
+    if (v is num) return DateTime.fromMillisecondsSinceEpoch(v.toInt());
+    if (v is String) return DateTime.parse(v);
+    return DateTime.now();
+  }
 }
 
-/// Chi tiết hội thoại kèm sản phẩm (mua bán trong chat).
 class ChatThreadDetail {
   const ChatThreadDetail({
     required this.threadId,
@@ -64,7 +92,7 @@ class ChatThreadDetail {
     required this.amSeller,
   });
 
-  final int threadId;
+  final String threadId;
   final int buyerId;
   final int sellerId;
   final String sellerName;
@@ -88,12 +116,9 @@ class ChatThreadDetail {
       orderId == null &&
       (productStatus == null || productStatus == 'Available');
 
-  bool get awaitingSellerConfirm =>
-      amSeller && orderId == null && productId != null;
-
   factory ChatThreadDetail.fromJson(Map<String, dynamic> json) {
     return ChatThreadDetail(
-      threadId: (json['threadId'] as num).toInt(),
+      threadId: json['threadId']?.toString() ?? '',
       buyerId: (json['buyerId'] as num).toInt(),
       sellerId: (json['sellerId'] as num).toInt(),
       sellerName: json['sellerName'] as String? ?? '',
@@ -112,6 +137,21 @@ class ChatThreadDetail {
       amSeller: json['amSeller'] as bool? ?? false,
     );
   }
+
+  factory ChatThreadDetail.fromThread(ChatThread t, int myUserId) {
+    return ChatThreadDetail(
+      threadId: t.threadId,
+      buyerId: t.buyerId,
+      sellerId: t.sellerId,
+      sellerName: t.sellerName,
+      buyerName: t.buyerName,
+      productId: t.productId,
+      productTitle: t.productTitle,
+      orderId: t.orderId,
+      amBuyer: myUserId == t.buyerId,
+      amSeller: myUserId == t.sellerId,
+    );
+  }
 }
 
 class ChatMessage {
@@ -127,8 +167,8 @@ class ChatMessage {
     required this.mine,
   });
 
-  final int messageId;
-  final int threadId;
+  final String messageId;
+  final String threadId;
   final int senderId;
   final String senderName;
   final String body;
@@ -137,6 +177,8 @@ class ChatMessage {
   final DateTime createdAt;
   final bool mine;
 
+  bool get isProductCard => messageType == 'PRODUCT_CARD';
+  bool get isImage => messageType == 'IMAGE';
   bool get isPurchaseRequest => messageType == 'PURCHASE_REQUEST';
   bool get isSaleConfirmed => messageType == 'SALE_CONFIRMED';
   bool get isPendingPurchase =>
@@ -145,17 +187,40 @@ class ChatMessage {
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     final rawMeta = json['meta'];
     return ChatMessage(
-      messageId: (json['messageId'] as num).toInt(),
-      threadId: (json['threadId'] as num).toInt(),
+      messageId: json['messageId']?.toString() ?? '',
+      threadId: json['threadId']?.toString() ?? '',
       senderId: (json['senderId'] as num).toInt(),
       senderName: json['senderName'] as String? ?? '',
       body: json['body'] as String? ?? '',
       messageType: json['messageType'] as String? ?? 'TEXT',
-      meta: rawMeta is Map<String, dynamic>
-          ? rawMeta
-          : (rawMeta is Map ? Map<String, dynamic>.from(rawMeta) : {}),
-      createdAt: DateTime.parse(json['createdAt'] as String),
+      meta: _parseMeta(rawMeta),
+      createdAt: ChatThread._parseTime(json['createdAt']),
       mine: json['mine'] as bool? ?? false,
     );
+  }
+
+  factory ChatMessage.fromFirebase(
+    String messageId,
+    String threadId,
+    Map<dynamic, dynamic> data,
+    int myUserId,
+  ) {
+    return ChatMessage(
+      messageId: messageId,
+      threadId: threadId,
+      senderId: (data['senderId'] as num).toInt(),
+      senderName: data['senderName'] as String? ?? '',
+      body: data['body'] as String? ?? '',
+      messageType: data['messageType'] as String? ?? 'TEXT',
+      meta: _parseMeta(data['meta']),
+      createdAt: ChatThread._parseTime(data['createdAt']),
+      mine: (data['senderId'] as num).toInt() == myUserId,
+    );
+  }
+
+  static Map<String, dynamic> _parseMeta(dynamic rawMeta) {
+    if (rawMeta is Map<String, dynamic>) return rawMeta;
+    if (rawMeta is Map) return Map<String, dynamic>.from(rawMeta);
+    return {};
   }
 }

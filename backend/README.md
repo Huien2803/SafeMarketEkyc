@@ -148,16 +148,34 @@ Backend **không tự tính điểm** — đã có trigger SQL làm:
 
 ---
 
-## 7. Lộ trình phát triển tiếp theo
+## 7. Lộ trình phát triển
 
 | Phase | Module | Trạng thái |
 |-------|--------|------------|
-| 2 | Auth + Users | hiện tại |
-| 3 | EkycModule (gọi FPT.AI OCR + Face Match) | sắp tới |
-| 4 | ProductsModule + CategoriesModule | sắp tới |
-| 4 | OrdersModule + PaymentsModule (VNPay) | sắp tới |
-| 5 | ReportsModule + AdminModule (thống kê) | sắp tới |
-| 6 | Tích hợp với Flutter app | sắp tới |
+| 2 | Auth + Users | ✅ |
+| 3 | EkycModule (FPT.AI OCR + Face Match + liveness demo) | ✅ |
+| 4 | Products + Categories + upload ảnh | ✅ |
+| 4 | Orders + Escrow (Payments) | ✅ |
+| 5 | Chat, Reviews, Reports, Admin | ✅ |
+| 6 | Flutter app (`api_config.dart` → port 3000) | ✅ |
+
+### Chat realtime (Firebase)
+
+Tin nhắn lưu trên **Firebase Realtime Database** (không qua NestJS SQL).
+Đơn hàng trong chat vẫn tạo qua API `POST /orders`.
+
+1. Tạo project Firebase → bật Realtime Database
+2. Import `database.rules.json` (thư mục gốc repo) vào Firebase Console → Rules
+3. Chạy `flutterfire configure` hoặc điền `lib/firebase_options.dart` + `android/app/google-services.json`
+
+### Migration bổ sung (chat SQL — tùy chọn, NestJS chat cũ)
+
+Sau khi chạy `eKYC Market.sql`, chạy thêm:
+
+```bash
+# Trong SSMS hoặc sqlcmd
+sqlcmd -S localhost -d SafeMarketDB -i backend/db/migrate-demo-ready.sql
+```
 
 ---
 

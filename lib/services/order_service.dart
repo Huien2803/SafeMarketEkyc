@@ -22,8 +22,8 @@ class OrderService {
   Future<OrderItem> createOrder({
     required int productId,
     required String shippingAddress,
-    String paymentMethod = 'BANK_TRANSFER',
-    String deliveryMethod = 'SHIP',
+    String paymentMethod = 'CASH',
+    String deliveryMethod = 'DIRECT',
   }) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/orders');
     final res = await http
@@ -42,8 +42,14 @@ class OrderService {
     if (res.statusCode >= 200 && res.statusCode < 300) {
       return OrderItem.fromJson(body);
     }
+    if (res.statusCode >= 500) {
+      throw Exception('Không tạo được đơn hàng. Vui lòng thử lại sau.');
+    }
     final msg = body['message'];
-    throw Exception(msg is String ? msg : 'Không tạo được đơn hàng');
+    if (msg is List && msg.isNotEmpty) {
+      throw Exception(msg.join('\n'));
+    }
+    throw Exception(msg is String ? msg : 'Không tạo được đơn hàng (${res.statusCode})');
   }
 
   Future<OrderItem> getOrder(int orderId) async {
@@ -63,6 +69,20 @@ class OrderService {
     return (jsonDecode(res.body) as List<dynamic>)
         .map((e) => OrderItem.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  Future<List<OrderItem>> getMyPurchases() async {
+    final myId = AuthService.instance.currentUser?.userId;
+    if (myId == null) return [];
+    final all = await getMyOrders();
+    return all.where((o) => o.buyerId == myId).toList();
+  }
+
+  Future<List<OrderItem>> getMySales() async {
+    final myId = AuthService.instance.currentUser?.userId;
+    if (myId == null) return [];
+    final all = await getMyOrders();
+    return all.where((o) => o.sellerId == myId).toList();
   }
 
   Future<OrderItem> markShipped(int orderId) async =>
@@ -126,6 +146,15 @@ class OrderService {
 
   Future<List<SoldListing>> getSoldProducts() async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/users/me/sold-products');
+    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
+    if (res.statusCode != 200) return [];
+    return (jsonDecode(res.body) as List<dynamic>)
+        .map((e) => SoldListing.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<List<SoldListing>> getUserListings(int userId) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/users/$userId/listings');
     final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
     if (res.statusCode != 200) return [];
     return (jsonDecode(res.body) as List<dynamic>)

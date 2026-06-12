@@ -1,149 +1,170 @@
-import 'dart:convert';
-
-import 'package:http/http.dart' as http;
 import 'package:safemarket_app/models/chat.dart';
-import 'package:safemarket_app/services/api_config.dart';
+import 'package:safemarket_app/models/order.dart';
+import 'package:safemarket_app/models/product.dart';
 import 'package:safemarket_app/services/auth_service.dart';
+import 'package:safemarket_app/services/firebase_chat_service.dart';
+import 'package:safemarket_app/services/order_service.dart';
+import 'package:safemarket_app/services/user_service.dart';
 
+/// Chat realtime (Firebase) + đơn hàng (NestJS API).
 class ChatService {
   ChatService._();
   static final ChatService instance = ChatService._();
 
-  Map<String, String> get _headers {
-    final token = AuthService.instance.accessToken;
-    return {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      if (token != null) 'Authorization': 'Bearer $token',
-    };
+  final _firebase = FirebaseChatService.instance;
+
+  Stream<List<ChatThread>> watchThreads() {
+    final userId = AuthService.instance.currentUser?.userId ?? 0;
+    return _firebase.watchUserThreads(userId);
   }
 
-  Future<int> openThread({
+  Stream<int> watchTotalUnread() {
+    final userId = AuthService.instance.currentUser?.userId ?? 0;
+    return _firebase.watchTotalUnread(userId);
+  }
+
+  Future<void> markThreadRead(String threadId) {
+    final userId = AuthService.instance.currentUser?.userId ?? 0;
+    return _firebase.markThreadRead(threadId, userId);
+  }
+
+  Stream<List<ChatMessage>> watchMessages(String threadId) {
+    final userId = AuthService.instance.currentUser?.userId ?? 0;
+    return _firebase.watchMessages(threadId, userId);
+  }
+
+  Future<String> openThread({
     required int sellerId,
     int? productId,
     int? orderId,
+    String? sellerName,
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/chat/open');
-    final res = await http
-        .post(
-          uri,
-          headers: _headers,
-          body: jsonEncode({
-            'sellerId': sellerId,
-            if (productId != null) 'productId': productId,
-            if (orderId != null) 'orderId': orderId,
-          }),
-        )
-        .timeout(ApiConfig.timeout);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode >= 200 && res.statusCode < 300) {
-      return (body['threadId'] as num).toInt();
-    }
-    throw Exception(body['message'] ?? 'Không mở được chat');
+    return _firebase.openThread(
+      sellerId: sellerId,
+      productId: productId,
+      orderId: orderId,
+      sellerName: sellerName,
+    );
   }
 
-  Future<ChatThreadDetail> getThreadDetail(int threadId) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/chat/threads/$threadId');
-    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 200) {
-      throw Exception(body['message'] ?? 'Không tải được hội thoại');
-    }
-    return ChatThreadDetail.fromJson(body);
+  Future<ChatThreadDetail> getThreadDetail(String threadId) {
+    return _firebase.getThreadDetail(threadId);
   }
 
+  /// @deprecated Dùng [watchThreads] cho realtime
   Future<List<ChatThread>> getThreads() async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/chat/threads');
-    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
-    if (res.statusCode != 200) return [];
-    return (jsonDecode(res.body) as List<dynamic>)
-        .map((e) => ChatThread.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final userId = AuthService.instance.currentUser?.userId ?? 0;
+    return _firebase.watchUserThreads(userId).first;
   }
 
-  Future<List<ChatMessage>> getMessages(int threadId) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/chat/threads/$threadId/messages');
-    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
-    if (res.statusCode != 200) return [];
-    return (jsonDecode(res.body) as List<dynamic>)
-        .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-        .toList();
+  Future<void> sendProductCard(String threadId, ProductDetail product) {
+    final thumbnail = product.thumbnailUrl ??
+        (product.imageUrls.isNotEmpty ? product.imageUrls.first : null);
+    return _firebase.sendProductCardMessage(
+      threadId: threadId,
+      productMeta: {
+        'productId': product.id,
+        'title': product.title,
+        'price': product.price,
+        'priceFormatted': product.priceFormatted,
+        'conditionPct': product.conditionPct,
+        'thumbnailUrl': thumbnail,
+        'location': product.location,
+        'status': product.status,
+      },
+    );
   }
 
-  Future<SendMessageResult> sendMessage(int threadId, String body) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/chat/threads/$threadId/messages');
-    final res = await http
-        .post(
-          uri,
-          headers: _headers,
-          body: jsonEncode({'body': body}),
-        )
-        .timeout(ApiConfig.timeout);
-    if (res.statusCode != 200) {
-      final err = jsonDecode(res.body) as Map<String, dynamic>;
-      throw Exception(err['message'] ?? 'Gửi tin thất bại');
-    }
-    final decoded = jsonDecode(res.body);
-    if (decoded is Map<String, dynamic>) {
-      final list = (decoded['messages'] as List<dynamic>)
-          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-          .toList();
-      return SendMessageResult(
-        messages: list,
-        scamWarning: decoded['scamWarning'] as String?,
-      );
-    }
-    final list = (decoded as List<dynamic>)
-        .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-        .toList();
-    return SendMessageResult(messages: list);
+  Future<void> sendImage(String threadId, String imageUrl) {
+    return _firebase.sendImageMessage(threadId, imageUrl);
   }
 
-  Future<List<ChatMessage>> sendPurchaseRequest(
-    int threadId,
+  Future<SendMessageResult> sendMessage(String threadId, String body) async {
+    final detail = await getThreadDetail(threadId);
+    final myId = AuthService.instance.currentUser?.userId ?? 0;
+    final peerId = myId == detail.buyerId ? detail.sellerId : detail.buyerId;
+
+    String? scamWarning;
+    try {
+      final peerProfile = await UserService.instance.getProfile(peerId);
+      final score = peerProfile.trustScore?.currentPoint ?? 500;
+      if (score < 300) {
+        scamWarning =
+            'Cảnh báo: Người này có điểm tín nhiệm thấp ($score/1000). '
+            'Nên giao dịch qua escrow SafeMarket.';
+      }
+    } catch (_) {}
+
+    await _firebase.sendTextMessage(threadId, body);
+
+    final messages = await _firebase.watchMessages(threadId, myId).first;
+    return SendMessageResult(messages: messages, scamWarning: scamWarning);
+  }
+
+  Future<void> sendPurchaseRequest(
+    String threadId,
     String shippingAddress, {
-    String paymentMethod = 'BANK_TRANSFER',
-    String deliveryMethod = 'SHIP',
+    String paymentMethod = 'CASH',
+    String deliveryMethod = 'DIRECT',
   }) async {
-    final uri =
-        Uri.parse('${ApiConfig.baseUrl}/chat/threads/$threadId/purchase-request');
-    final res = await http
-        .post(
-          uri,
-          headers: _headers,
-          body: jsonEncode({
-            'shippingAddress': shippingAddress,
-            'paymentMethod': paymentMethod,
-            'deliveryMethod': deliveryMethod,
-          }),
-        )
-        .timeout(ApiConfig.timeout);
-    if (res.statusCode != 200) {
-      final err = jsonDecode(res.body) as Map<String, dynamic>;
-      throw Exception(err['message'] ?? 'Không gửi yêu cầu mua');
+    final thread = await getThreadDetail(threadId);
+    if (thread.productId == null) {
+      throw Exception('Hội thoại không gắn sản phẩm');
     }
-    return (jsonDecode(res.body) as List<dynamic>)
-        .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-        .toList();
+
+    OrderItem order;
+    try {
+      order = await OrderService.instance.createOrder(
+        productId: thread.productId!,
+        shippingAddress: shippingAddress,
+        paymentMethod: paymentMethod,
+        deliveryMethod: deliveryMethod,
+      );
+    } catch (e) {
+      final msg = e.toString();
+      if (msg.contains('đã có đơn') ||
+          msg.contains('Conflict') ||
+          msg.contains('409')) {
+        throw Exception(
+          'Sản phẩm đã có đơn đặt mua. Hủy đơn cũ hoặc chọn sản phẩm khác.',
+        );
+      }
+      if (msg.contains('không còn khả dụng') ||
+          msg.contains('Reserved') ||
+          msg.contains('Sold')) {
+        throw Exception('Sản phẩm không còn khả dụng để đặt mua.');
+      }
+      rethrow;
+    }
+
+    final payLabel = order.paymentMethodLabel;
+    final delLabel = order.deliveryMethodLabel;
+
+    await _firebase.sendPurchaseRequestMessage(
+      threadId: threadId,
+      orderId: order.orderId,
+      shippingAddress: shippingAddress,
+      paymentMethod: paymentMethod,
+      deliveryMethod: deliveryMethod,
+      thread: thread,
+      paymentLabel: payLabel,
+      deliveryLabel: delLabel,
+    );
   }
 
-  Future<List<ChatMessage>> confirmSale(int threadId, int messageId) async {
-    final uri =
-        Uri.parse('${ApiConfig.baseUrl}/chat/threads/$threadId/confirm-sale');
-    final res = await http
-        .post(
-          uri,
-          headers: _headers,
-          body: jsonEncode({'messageId': messageId}),
-        )
-        .timeout(ApiConfig.timeout);
-    if (res.statusCode != 200) {
-      final err = jsonDecode(res.body) as Map<String, dynamic>;
-      throw Exception(err['message'] ?? 'Không xác nhận được');
+  Future<void> confirmSale(String threadId, String messageId) async {
+    final thread = await getThreadDetail(threadId);
+    final orderId = thread.orderId;
+    if (orderId == null) {
+      throw Exception('Chưa có đơn hàng để xác nhận');
     }
-    return (jsonDecode(res.body) as List<dynamic>)
-        .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-        .toList();
+
+    await OrderService.instance.markPaymentReceived(orderId);
+    await _firebase.confirmSaleMessage(
+      threadId: threadId,
+      messageId: messageId,
+      orderId: orderId,
+    );
   }
 }
 

@@ -1,0 +1,8 @@
+{
+  "rules": {
+    "safemarket": {
+      ".read": true,
+      ".write": true
+    }
+  }
+}

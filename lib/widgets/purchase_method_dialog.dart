@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
 
-/// Hai phương thức mua hàng của SafeMarket.
+/// Phương thức mua hàng: giao trực tiếp, trả tiền mặt.
 class PurchaseMethodChoice {
   const PurchaseMethodChoice({
     required this.paymentMethod,
@@ -21,16 +21,6 @@ class PurchaseMethodChoice {
   final String addressHint;
   final IconData icon;
 
-  static const bankTransferShip = PurchaseMethodChoice(
-    paymentMethod: 'BANK_TRANSFER',
-    deliveryMethod: 'SHIP',
-    title: 'Chuyển khoản + Giao ship',
-    subtitle: 'Chuyển khoản cho người bán, nhận hàng qua đơn vị vận chuyển',
-    addressLabel: 'Địa chỉ nhận hàng',
-    addressHint: 'Quận 1, TP.HCM',
-    icon: Icons.local_shipping_outlined,
-  );
-
   static const cashDirect = PurchaseMethodChoice(
     paymentMethod: 'CASH',
     deliveryMethod: 'DIRECT',
@@ -40,8 +30,6 @@ class PurchaseMethodChoice {
     addressHint: 'Quán cà phê, Bến xe, Quận 3...',
     icon: Icons.handshake_outlined,
   );
-
-  static const all = [bankTransferShip, cashDirect];
 
   bool get isDirect => deliveryMethod == 'DIRECT';
 }
@@ -56,7 +44,7 @@ class PurchaseMethodResult {
   final String address;
 }
 
-/// Dialog chọn phương thức mua (dùng chung trang chi tiết SP & chat).
+/// Dialog nhập địa điểm hẹn giao (giao trực tiếp, tiền mặt).
 Future<PurchaseMethodResult?> showPurchaseMethodDialog(
   BuildContext context, {
   required String productTitle,
@@ -85,14 +73,14 @@ class _PurchaseMethodDialog extends StatefulWidget {
 }
 
 class _PurchaseMethodDialogState extends State<_PurchaseMethodDialog> {
-  PurchaseMethodChoice _selected = PurchaseMethodChoice.bankTransferShip;
+  static const _method = PurchaseMethodChoice.cashDirect;
   late final TextEditingController _addressCtrl;
 
   @override
   void initState() {
     super.initState();
     _addressCtrl = TextEditingController(
-      text: widget.defaultAddress ?? 'Quận 1, TP.HCM',
+      text: widget.defaultAddress ?? 'Quận 3, TP.HCM',
     );
   }
 
@@ -102,19 +90,10 @@ class _PurchaseMethodDialogState extends State<_PurchaseMethodDialog> {
     super.dispose();
   }
 
-  void _onSelect(PurchaseMethodChoice m) {
-    setState(() {
-      _selected = m;
-      if (m.isDirect && _addressCtrl.text == 'Quận 1, TP.HCM') {
-        _addressCtrl.text = widget.defaultAddress ?? 'Quận 3, TP.HCM';
-      }
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Chọn phương thức mua'),
+      title: const Text('Đặt mua hàng'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -125,67 +104,49 @@ class _PurchaseMethodDialogState extends State<_PurchaseMethodDialog> {
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 16),
-            ...PurchaseMethodChoice.all.map((m) {
-              final selected = _selected == m;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: InkWell(
-                  onTap: () => _onSelect(m),
-                  borderRadius: BorderRadius.circular(12),
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: selected
-                            ? AppColors.primary
-                            : AppColors.textMuted.withValues(alpha: 0.3),
-                        width: selected ? 2 : 1,
-                      ),
-                      color: selected
-                          ? AppColors.sellerCardBg
-                          : AppColors.white,
-                    ),
-                    child: Row(
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.primary, width: 2),
+                color: AppColors.sellerCardBg,
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.handshake_outlined,
+                    color: AppColors.primary,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(m.icon, color: AppColors.primary),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                m.title,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                m.subtitle,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: AppColors.textSecondary,
-                                ),
-                              ),
-                            ],
+                        Text(
+                          _method.title,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _method.subtitle,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
                           ),
                         ),
-                        if (selected)
-                          const Icon(Icons.check_circle, color: AppColors.primary),
                       ],
                     ),
                   ),
-                ),
-              );
-            }),
-            const SizedBox(height: 8),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
             TextField(
               controller: _addressCtrl,
               decoration: InputDecoration(
-                labelText: _selected.addressLabel,
-                hintText: _selected.addressHint,
+                labelText: _method.addressLabel,
+                hintText: _method.addressHint,
                 border: const OutlineInputBorder(),
               ),
               maxLines: 2,
@@ -204,7 +165,7 @@ class _PurchaseMethodDialogState extends State<_PurchaseMethodDialog> {
             if (addr.isEmpty) return;
             Navigator.pop(
               context,
-              PurchaseMethodResult(method: _selected, address: addr),
+              PurchaseMethodResult(method: _method, address: addr),
             );
           },
           child: const Text('Tiếp tục'),

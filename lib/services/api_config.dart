@@ -1,27 +1,25 @@
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 
-/// Cấu hình base URL backend Java Spring Boot (SafeMarket.JavaApi).
+/// Cấu hình base URL backend NestJS (SafeMarket API).
 ///
-/// Kiến trúc đồ án: Flutter → Java API (port 5214) → SQL Server.
-/// Thư mục `backend/` (NestJS) trong repo GitHub là tùy chọn — không bắt buộc Node.js.
+/// Kiến trúc: Flutter → NestJS (port 3000) → SQL Server
 ///
 /// LƯU Ý KHI DEMO:
-/// - Android Emulator KHÔNG thấy `localhost` của máy host → phải dùng `10.0.2.2`
-/// - iOS Simulator dùng `localhost` được
-/// - Web (Chrome) dùng `localhost`
+/// - Android Emulator: dùng `10.0.2.2` (localhost của máy host)
+/// - iOS Simulator: `127.0.0.1`
+/// - Web (Chrome): `localhost`
 /// - Điện thoại thật → đổi `_lanHost` thành IP máy tính (vd 192.168.1.10)
 class ApiConfig {
   ApiConfig._();
 
-  /// Port Java API (`application.properties`: server.port=5214)
-  static const int _port = 5214;
+  /// Port NestJS (`backend/.env`: PORT=3000)
+  static const int _port = 3000;
 
   /// IP máy tính trong LAN khi test trên điện thoại thật.
-  /// Mở CMD gõ `ipconfig` → IPv4 Address (vd: 192.168.1.10)
+  /// Mở CMD gõ `ipconfig` → IPv4 Address
   static const String _lanHost = '192.168.1.10';
 
-  /// Tự động sinh base URL phù hợp với platform đang chạy.
   static String get baseUrl {
     if (kIsWeb) {
       return 'http://localhost:$_port/api';

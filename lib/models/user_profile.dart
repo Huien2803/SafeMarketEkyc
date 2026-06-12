@@ -13,6 +13,9 @@ class UserProfile {
     this.boughtCount = 0,
     this.reviewCount = 0,
     this.averageRating = 0,
+    this.followerCount = 0,
+    this.followingCount = 0,
+    this.isFollowing = false,
     this.displayName,
     this.location,
     this.avatarUrl,
@@ -35,6 +38,9 @@ class UserProfile {
   final int boughtCount;
   final int reviewCount;
   final double averageRating;
+  final int followerCount;
+  final int followingCount;
+  final bool isFollowing;
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
     return UserProfile(
@@ -58,6 +64,9 @@ class UserProfile {
       boughtCount: (json['boughtCount'] as num?)?.toInt() ?? 0,
       reviewCount: (json['reviewCount'] as num?)?.toInt() ?? 0,
       averageRating: (json['averageRating'] as num?)?.toDouble() ?? 0,
+      followerCount: (json['followerCount'] as num?)?.toInt() ?? 0,
+      followingCount: (json['followingCount'] as num?)?.toInt() ?? 0,
+      isFollowing: json['isFollowing'] as bool? ?? false,
     );
   }
 

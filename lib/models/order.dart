@@ -54,14 +54,16 @@ class OrderItem {
 
   bool get isDirectOrder => paymentMethod == 'CASH' && deliveryMethod == 'DIRECT';
 
+  bool get isCompleted => orderStatus == 'Completed';
+
   String get methodSummary => '$paymentMethodLabel · $deliveryMethodLabel';
 
   String get addressLabel =>
       isDirectOrder ? 'Địa điểm hẹn giao' : 'Địa chỉ nhận hàng';
 
   factory OrderItem.fromJson(Map<String, dynamic> json) {
-    final pay = json['paymentMethod'] as String? ?? 'BANK_TRANSFER';
-    final del = json['deliveryMethod'] as String? ?? 'SHIP';
+    final pay = json['paymentMethod'] as String? ?? 'CASH';
+    final del = json['deliveryMethod'] as String? ?? 'DIRECT';
     return OrderItem(
       orderId: (json['orderId'] as num).toInt(),
       orderStatus: json['orderStatus'] as String? ?? 'Pending',

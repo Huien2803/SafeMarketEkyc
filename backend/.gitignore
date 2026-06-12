@@ -43,3 +43,7 @@ lerna-debug.log*
 # Temp
 .tmp
 .cache
+
+# Ảnh upload thật — không commit file ảnh user
+/uploads/products/*
+!/uploads/products/.gitkeep

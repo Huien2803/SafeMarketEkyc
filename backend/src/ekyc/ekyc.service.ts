@@ -37,7 +37,7 @@ export class EkycService {
    * với toàn bộ thông tin đã trích xuất. Backend sẽ:
    *   1. Validate similarity >= ngưỡng
    *   2. Upsert vào [Identity].[eKYC_Profiles]
-   *   3. Set verified_at = now() để trigger SQL chuyển kyc_status -> Verified
+   *   3. Set trạng thái Pending — admin duyệt qua /admin/ekyc/:id/approve
    */
   async submit(userId: number, dto: SubmitEkycDto): Promise<EkycStatusDto> {
     if (dto.faceSimilarity < this.FACE_MATCH_THRESHOLD) {
@@ -66,7 +66,7 @@ export class EkycService {
         idBackUrl: dto.idBackUrl ?? null,
         faceVideoUrl: dto.selfieUrl ?? null,
         submittedAt: now,
-        verifiedAt: now,
+        verifiedAt: null,
         rejectionReason: null,
       });
     } else {
@@ -77,18 +77,20 @@ export class EkycService {
       profile.idFrontUrl = dto.idFrontUrl ?? profile.idFrontUrl;
       profile.idBackUrl = dto.idBackUrl ?? profile.idBackUrl;
       profile.faceVideoUrl = dto.selfieUrl ?? profile.faceVideoUrl;
-      profile.submittedAt = profile.submittedAt ?? now;
-      profile.verifiedAt = now;
+      profile.submittedAt = now;
+      profile.verifiedAt = null;
       profile.rejectionReason = null;
     }
 
     await this.ekycRepo.save(profile);
 
-    // Trigger SQL sẽ tự set user.kyc_status = 'Verified'. Reload để chắc chắn.
+    user.kycStatus = 'Pending';
+    await this.userRepo.save(user);
+
     const refreshed = await this.userRepo.findOne({ where: { userId } });
 
     this.logger.log(
-      `eKYC user ${userId} verified, similarity=${dto.faceSimilarity}`,
+      `eKYC user ${userId} submitted (Pending), similarity=${dto.faceSimilarity}`,
     );
 
     return this.toStatusDto(refreshed!, profile);

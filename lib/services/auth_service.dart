@@ -156,4 +156,25 @@ class AuthService extends ChangeNotifier {
     await prefs.setString(_kUserKey, jsonEncode(auth.user.toJson()));
     notifyListeners();
   }
+
+  /// Cập nhật thông tin user trong bộ nhớ sau khi sửa hồ sơ.
+  Future<void> updateCachedUser({
+    String? displayName,
+    String? phoneNumber,
+  }) async {
+    final user = _currentUser;
+    if (user == null) return;
+    _currentUser = AuthUser(
+      userId: user.userId,
+      email: user.email,
+      phoneNumber: phoneNumber ?? user.phoneNumber,
+      displayName: displayName ?? user.displayName,
+      kycStatus: user.kycStatus,
+      accountStatus: user.accountStatus,
+      isAdmin: user.isAdmin,
+    );
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kUserKey, jsonEncode(_currentUser!.toJson()));
+    notifyListeners();
+  }
 }

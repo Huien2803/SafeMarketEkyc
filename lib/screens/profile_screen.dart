@@ -9,8 +9,13 @@ import 'package:safemarket_app/screens/notifications_screen.dart';
 import 'package:safemarket_app/services/auth_service.dart';
 import 'package:safemarket_app/models/sold_listing.dart';
 import 'package:safemarket_app/screens/order_detail_screen.dart';
+import 'package:safemarket_app/screens/edit_profile_screen.dart';
+import 'package:safemarket_app/screens/seller_reviews_screen.dart';
+import 'package:safemarket_app/screens/product_detail.dart';
 import 'package:safemarket_app/services/order_service.dart';
 import 'package:safemarket_app/services/user_service.dart';
+import 'package:safemarket_app/widgets/product_status_badge.dart';
+import 'package:safemarket_app/widgets/product_thumbnail.dart';
 import 'package:safemarket_app/widgets/verified_badge.dart';
 
 /// Màn hình Cá nhân — lấy dữ liệu thật từ API `/users/me`.
@@ -170,9 +175,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _UserHeaderSection(profile: profile),
+                          _UserHeaderSection(
+                            profile: profile,
+                            onEdit: () async {
+                              final updated = await Navigator.push<UserProfile>(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      EditProfileScreen(profile: profile),
+                                ),
+                              );
+                              if (updated != null) _refresh();
+                            },
+                          ),
                           const SizedBox(height: 20),
-                          _StatsRow(profile: profile),
+                          _StatsRow(
+                            profile: profile,
+                            onReviewsTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => SellerReviewsScreen(
+                                    userId: profile.userId,
+                                    displayName:
+                                        profile.displayName ?? profile.email,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
                           const SizedBox(height: 20),
                           _TrustCard(trustScore: profile.trustScore),
                           const SizedBox(height: 24),
@@ -229,9 +260,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               FutureBuilder<List<SoldListing>>(
                                 future: _soldFuture,
                                 builder: (context, soldSnap) {
-                                  final count = soldSnap.data?.length ?? 0;
+                                  final active = (soldSnap.data ?? [])
+                                      .where((s) => s.isActive)
+                                      .length;
                                   return Text(
-                                    'ĐÃ ĐĂNG BÁN ($count)',
+                                    'ĐANG RAO BÁN ($active)',
                                     style: const TextStyle(
                                       fontSize: 14,
                                       fontWeight: FontWeight.w700,
@@ -240,7 +273,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   );
                                 },
                               ),
-                              const SizedBox(width: 8),
                             ],
                           ),
                           const SizedBox(height: 8),
@@ -256,14 +288,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   ),
                                 );
                               }
-                              final items = soldSnap.data ?? [];
-                              if (items.isEmpty) {
+                              final activeItems = (soldSnap.data ?? [])
+                                  .where((s) => s.isActive)
+                                  .toList();
+                              if (activeItems.isEmpty) {
                                 return Container(
                                   padding: const EdgeInsets.all(20),
                                   decoration: AppDecorations.card(),
                                   child: const Center(
                                     child: Text(
-                                      'Bạn chưa đăng sản phẩm nào',
+                                      'Bạn chưa có tin đang bán',
                                       style: TextStyle(
                                         color: AppColors.textMuted,
                                       ),
@@ -272,8 +306,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 );
                               }
                               return Column(
-                                children: items
-                                    .map((s) => _SoldListingTile(item: s))
+                                children: activeItems
+                                    .map(
+                                      (s) => _SellerListingTile(
+                                        item: s,
+                                        showSoldBadge: false,
+                                      ),
+                                    )
                                     .toList(),
                               );
                             },
@@ -282,34 +321,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text(
-                                'ĐANG RAO BÁN (${profile.activeListingCount})',
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.textPrimary,
-                                ),
-                              ),
-                              TextButton(
-                                onPressed: () {},
-                                child: const Text('Xem tất cả'),
+                              FutureBuilder<List<SoldListing>>(
+                                future: _soldFuture,
+                                builder: (context, soldSnap) {
+                                  final sold = (soldSnap.data ?? [])
+                                      .where((s) => s.isSold)
+                                      .length;
+                                  return Text(
+                                    'ĐÃ BÁN ($sold)',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.textPrimary,
+                                    ),
+                                  );
+                                },
                               ),
                             ],
                           ),
                           const SizedBox(height: 8),
-                          Container(
-                            padding: const EdgeInsets.all(20),
-                            decoration: AppDecorations.card(),
-                            child: Center(
-                              child: Text(
-                                profile.activeListingCount == 0
-                                    ? 'Bạn chưa đăng tin nào'
-                                    : 'Có ${profile.activeListingCount} tin đang bán',
-                                style: TextStyle(
-                                  color: AppColors.textMuted,
-                                ),
-                              ),
-                            ),
+                          FutureBuilder<List<SoldListing>>(
+                            future: _soldFuture,
+                            builder: (context, soldSnap) {
+                              if (soldSnap.connectionState ==
+                                  ConnectionState.waiting) {
+                                return const SizedBox.shrink();
+                              }
+                              final soldItems = (soldSnap.data ?? [])
+                                  .where((s) => s.isSold)
+                                  .toList();
+                              if (soldItems.isEmpty) {
+                                return Container(
+                                  padding: const EdgeInsets.all(20),
+                                  decoration: AppDecorations.card(),
+                                  child: const Center(
+                                    child: Text(
+                                      'Chưa có sản phẩm đã bán',
+                                      style: TextStyle(
+                                        color: AppColors.textMuted,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }
+                              return Column(
+                                children: soldItems
+                                    .map(
+                                      (s) => _SellerListingTile(
+                                        item: s,
+                                        showSoldBadge: true,
+                                      ),
+                                    )
+                                    .toList(),
+                              );
+                            },
                           ),
                           const SizedBox(height: 24),
                         ],
@@ -382,8 +447,13 @@ class _ErrorState extends StatelessWidget {
 }
 
 class _UserHeaderSection extends StatelessWidget {
-  const _UserHeaderSection({required this.profile});
+  const _UserHeaderSection({
+    required this.profile,
+    required this.onEdit,
+  });
+
   final UserProfile profile;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -456,6 +526,26 @@ class _UserHeaderSection extends StatelessWidget {
                   ),
                 ],
               ),
+              if (profile.phoneNumber.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.phone_outlined,
+                      size: 14,
+                      color: AppColors.textSecondary,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      profile.phoneNumber,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
               if (profile.location != null && profile.location!.isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Row(
@@ -497,6 +587,11 @@ class _UserHeaderSection extends StatelessWidget {
             ],
           ),
         ),
+        IconButton(
+          tooltip: 'Chỉnh sửa hồ sơ',
+          onPressed: onEdit,
+          icon: const Icon(Icons.edit_outlined, color: AppColors.primary),
+        ),
       ],
     );
   }
@@ -508,8 +603,13 @@ class _UserHeaderSection extends StatelessWidget {
 }
 
 class _StatsRow extends StatelessWidget {
-  const _StatsRow({required this.profile});
+  const _StatsRow({
+    required this.profile,
+    required this.onReviewsTap,
+  });
+
   final UserProfile profile;
+  final VoidCallback onReviewsTap;
 
   @override
   Widget build(BuildContext context) {
@@ -535,6 +635,7 @@ class _StatsRow extends StatelessWidget {
                 ? '${profile.averageRating.toStringAsFixed(1)}★'
                 : '—',
             label: 'ĐÁNH GIÁ (${profile.reviewCount})',
+            onTap: onReviewsTap,
           ),
         ),
       ],
@@ -542,9 +643,23 @@ class _StatsRow extends StatelessWidget {
   }
 }
 
-class _SoldListingTile extends StatelessWidget {
-  const _SoldListingTile({required this.item});
+class _SellerListingTile extends StatelessWidget {
+  const _SellerListingTile({
+    required this.item,
+    required this.showSoldBadge,
+  });
+
   final SoldListing item;
+  final bool showSoldBadge;
+
+  void _openProduct(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => ProductDetailScreen(productId: item.productId),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -552,73 +667,154 @@ class _SoldListingTile extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: AppDecorations.card(),
-      child: ListTile(
-        leading: Icon(
-          hasBuyer ? Icons.shopping_cart_checkout : Icons.storefront_outlined,
-          color: hasBuyer ? AppColors.trustGreen : AppColors.textMuted,
+      child: InkWell(
+        onTap: () => _openProduct(context),
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 72,
+                height: 72,
+                child: Stack(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: ProductThumbnail(
+                        thumbnailUrl: item.thumbnailUrl,
+                        iconSize: 28,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    if (showSoldBadge)
+                      Positioned(
+                        top: 4,
+                        left: 4,
+                        child: ProductStatusBadge(
+                          status: 'Sold',
+                          compact: true,
+                        ),
+                      ),
+                    if (showSoldBadge)
+                      Positioned.fill(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: ColoredBox(
+                            color: Colors.black.withValues(alpha: 0.2),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      item.priceFormatted,
+                      style: const TextStyle(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      item.isSold
+                          ? (item.buyerName != null
+                              ? 'Đã bán cho ${item.buyerName}'
+                              : 'Đã bán')
+                          : item.buyerStatusLabel,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (hasBuyer && item.orderId != null)
+                IconButton(
+                  tooltip: 'Chi tiết đơn',
+                  icon: const Icon(Icons.receipt_long_outlined),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) =>
+                            OrderDetailScreen(orderId: item.orderId!),
+                      ),
+                    );
+                  },
+                )
+              else
+                const Icon(Icons.chevron_right, color: AppColors.textMuted),
+            ],
+          ),
         ),
-        title: Text(
-          item.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(
-          '${item.priceFormatted} • ${item.buyerStatusLabel}',
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: hasBuyer && item.orderId != null
-            ? const Icon(Icons.chevron_right)
-            : null,
-        onTap: item.orderId != null
-            ? () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute<void>(
-                    builder: (_) =>
-                        OrderDetailScreen(orderId: item.orderId!),
-                  ),
-                );
-              }
-            : null,
       ),
     );
   }
 }
 
 class _StatCard extends StatelessWidget {
-  const _StatCard({required this.value, required this.label});
+  const _StatCard({
+    required this.value,
+    required this.label,
+    this.onTap,
+  });
 
   final String value;
   final String label;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      decoration: AppDecorations.card(),
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-              color: AppColors.textPrimary,
-            ),
+    final child = Column(
+      children: [
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w800,
+            color: AppColors.textPrimary,
           ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textMuted,
-              letterSpacing: 0.5,
-            ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textMuted,
+            letterSpacing: 0.5,
           ),
-        ],
+        ),
+      ],
+    );
+
+    return Material(
+      color: AppColors.white,
+      borderRadius: BorderRadius.circular(AppDecorations.radiusCard),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppDecorations.radiusCard),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          decoration: AppDecorations.card(),
+          child: child,
+        ),
       ),
     );
   }

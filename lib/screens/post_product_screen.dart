@@ -7,6 +7,7 @@ import 'package:safemarket_app/core/theme/app_colors.dart';
 import 'package:safemarket_app/models/product.dart';
 import 'package:safemarket_app/services/auth_service.dart';
 import 'package:safemarket_app/services/product_service.dart';
+import 'package:safemarket_app/utils/input_validators.dart';
 
 /// Đăng bán sản phẩm — ảnh bắt buộc.
 class PostProductScreen extends StatefulWidget {
@@ -116,6 +117,13 @@ class _PostProductScreenState extends State<PostProductScreen> {
       return;
     }
     if (!_formKey.currentState!.validate()) return;
+    final conditionErr = InputValidators.productCondition(_condition.round());
+    if (conditionErr != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(conditionErr)),
+      );
+      return;
+    }
     if (_categoryId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Chọn danh mục sản phẩm')),
@@ -253,13 +261,18 @@ class _PostProductScreenState extends State<PostProductScreen> {
                     TextFormField(
                       controller: _descCtrl,
                       maxLines: 4,
-                      decoration: const InputDecoration(
+                      maxLength: InputValidators.maxProductDescription,
+                      decoration: InputDecoration(
                         labelText: 'Mô tả',
                         hintText: 'Tình trạng, phụ kiện kèm theo...',
-                        border: OutlineInputBorder(),
+                        border: const OutlineInputBorder(),
                         filled: true,
                         fillColor: AppColors.white,
+                        counterText:
+                            '${_descCtrl.text.length}/${InputValidators.maxProductDescription}',
                       ),
+                      onChanged: (_) => setState(() {}),
+                      validator: InputValidators.productDescription,
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
@@ -268,29 +281,23 @@ class _PostProductScreenState extends State<PostProductScreen> {
                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       decoration: const InputDecoration(
                         labelText: 'Giá (VNĐ) *',
-                        hintText: '15500000',
+                        hintText: 'Tối thiểu 50.001đ',
                         border: OutlineInputBorder(),
                         filled: true,
                         fillColor: AppColors.white,
                       ),
-                      validator: (v) {
-                        if (v == null || v.isEmpty) return 'Nhập giá';
-                        if (int.tryParse(v) == null || int.parse(v) <= 0) {
-                          return 'Giá không hợp lệ';
-                        }
-                        return null;
-                      },
+                      validator: InputValidators.productPrice,
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'Tình trạng: ${_condition.round()}%',
+                      'Độ bền / tình trạng: ${_condition.round()}% (tối thiểu ${InputValidators.minProductCondition}%)',
                       style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                     Slider(
                       value: _condition,
-                      min: 0,
+                      min: InputValidators.minProductCondition.toDouble(),
                       max: 100,
-                      divisions: 20,
+                      divisions: 7,
                       label: '${_condition.round()}%',
                       onChanged: (v) => setState(() => _condition = v),
                     ),

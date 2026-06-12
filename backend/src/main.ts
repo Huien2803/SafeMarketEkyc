@@ -2,11 +2,22 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { join } from 'path';
 import { AppModule } from './app.module';
+import { ensureProductUploadDir } from './products/product-upload.config';
+import { ensureChatUploadDir } from './chat/chat-upload.config';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: ['log', 'error', 'warn', 'debug'],
+  });
+
+  // Phục vụ ảnh upload từ thư mục backend/uploads/ tại http://host:3000/uploads/...
+  ensureProductUploadDir();
+  ensureChatUploadDir();
+  app.useStaticAssets(join(process.cwd(), 'uploads'), {
+    prefix: '/uploads/',
   });
 
   app.enableCors({
@@ -48,6 +59,9 @@ async function bootstrap() {
     .addTag('orders', 'Đơn hàng')
     .addTag('payments', 'Thanh toán (VNPay/MoMo)')
     .addTag('admin', 'Thống kê & duyệt báo cáo')
+    .addTag('chat', 'Nhắn tin mua bán')
+    .addTag('reviews', 'Đánh giá sau giao dịch')
+    .addTag('reports', 'Báo cáo vi phạm')
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);
@@ -61,6 +75,7 @@ async function bootstrap() {
 
   Logger.log(`SafeMarket API ready at http://localhost:${port}/api`, 'Bootstrap');
   Logger.log(`Swagger UI:        http://localhost:${port}/api/docs`, 'Bootstrap');
+  Logger.log(`Uploads static:    http://localhost:${port}/uploads/`, 'Bootstrap');
 }
 
 bootstrap();

@@ -60,4 +60,9 @@ export class SubmitEkycDto {
   @IsOptional()
   @IsString()
   selfieUrl?: string;
+
+  @ApiProperty({ required: false, description: 'Token từ bước liveness-check' })
+  @IsOptional()
+  @IsString()
+  livenessToken?: string;
 }

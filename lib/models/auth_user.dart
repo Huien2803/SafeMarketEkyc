@@ -8,6 +8,9 @@ class AuthUser {
     required this.accountStatus,
     required this.isAdmin,
     this.displayName,
+    this.trustScore,
+    this.reviewCount = 0,
+    this.averageRating = 0,
   });
 
   final int userId;
@@ -17,6 +20,9 @@ class AuthUser {
   final String kycStatus;
   final String accountStatus;
   final bool isAdmin;
+  final int? trustScore;
+  final int reviewCount;
+  final double averageRating;
 
   factory AuthUser.fromJson(Map<String, dynamic> json) {
     return AuthUser(
@@ -27,6 +33,9 @@ class AuthUser {
       kycStatus: json['kycStatus'] as String? ?? 'Unverified',
       accountStatus: json['accountStatus'] as String? ?? 'Active',
       isAdmin: json['isAdmin'] as bool? ?? false,
+      trustScore: (json['trustScore'] as num?)?.toInt(),
+      reviewCount: (json['reviewCount'] as num?)?.toInt() ?? 0,
+      averageRating: (json['averageRating'] as num?)?.toDouble() ?? 0,
     );
   }
 

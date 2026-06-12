@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:safemarket_app/core/constants/app_decorations.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
 import 'package:safemarket_app/models/order.dart';
+import 'package:safemarket_app/models/review.dart';
 import 'package:safemarket_app/screens/chat_screen.dart';
 import 'package:safemarket_app/services/auth_service.dart';
 import 'package:safemarket_app/services/chat_service.dart';
 import 'package:safemarket_app/services/order_service.dart';
 import 'package:safemarket_app/services/review_service.dart';
+import 'package:safemarket_app/widgets/review_submit_dialog.dart';
 
 class OrderDetailScreen extends StatefulWidget {
   const OrderDetailScreen({super.key, required this.orderId});
@@ -63,65 +65,28 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
-  Future<void> _showReviewDialog(OrderItem o) async {
-    int rating = 5;
-    final commentCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setLocal) => AlertDialog(
-          title: const Text('Đánh giá giao dịch'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(5, (i) {
-                  final star = i + 1;
-                  return IconButton(
-                    onPressed: () => setLocal(() => rating = star),
-                    icon: Icon(
-                      star <= rating ? Icons.star : Icons.star_border,
-                      color: Colors.amber,
-                    ),
-                  );
-                }),
-              ),
-              TextField(
-                controller: commentCtrl,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  hintText: 'Nhận xét (tuỳ chọn)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Huỷ'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Gửi đánh giá'),
-            ),
-          ],
-        ),
-      ),
+  Future<void> _showReviewDialog(OrderItem o, OrderReviewStatus status) async {
+    final reviewingSeller = _isBuyer(o);
+    final revieweeName = status.revieweeName ??
+        (reviewingSeller ? o.sellerName : o.buyerName);
+    final result = await ReviewSubmitDialog.show(
+      context,
+      revieweeName: revieweeName,
+      reviewingSeller: reviewingSeller,
     );
-    final comment = commentCtrl.text.trim();
-    commentCtrl.dispose();
-    if (ok != true || !mounted) return;
+    if (result == null || !mounted) return;
     await _run(() async {
       await ReviewService.instance.submitReview(
         orderId: o.orderId,
-        rating: rating,
-        comment: comment.isEmpty ? null : comment,
+        rating: result.rating,
+        comment: result.comment,
       );
       if (mounted) {
+        final bonus = result.rating == 5 && reviewingSeller
+            ? ' Người bán được +30 điểm tin cậy.'
+            : '';
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Cảm ơn bạn đã đánh giá!')),
+          SnackBar(content: Text('Cảm ơn bạn đã đánh giá!$bonus')),
         );
       }
     });
@@ -346,18 +311,54 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   ),
                 ],
                 if (o.orderStatus == 'Completed')
-                  FutureBuilder(
-                    future: ReviewService.instance.getOrderReviewStatus(o.orderId),
+                  FutureBuilder<OrderReviewStatus>(
+                    future:
+                        ReviewService.instance.getOrderReviewStatus(o.orderId),
                     builder: (context, snap) {
-                      if (!snap.hasData || !snap.data!.canReview) {
+                      if (!snap.hasData) return const SizedBox.shrink();
+                      final status = snap.data!;
+                      final reviewed = _isBuyer(o)
+                          ? status.buyerReviewed
+                          : status.sellerReviewed;
+                      if (reviewed) {
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppColors.trustGreen.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Row(
+                              children: [
+                                Icon(Icons.check_circle,
+                                    color: AppColors.trustGreen),
+                                SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Bạn đã gửi đánh giá cho giao dịch này',
+                                    style: TextStyle(fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }
+                      if (!status.canReview) {
                         return const SizedBox.shrink();
                       }
+                      final label = _isBuyer(o)
+                          ? 'Đánh giá người bán'
+                          : 'Đánh giá người mua';
                       return Padding(
                         padding: const EdgeInsets.only(top: 12),
                         child: FilledButton.icon(
-                          onPressed: _busy ? null : () => _showReviewDialog(o),
+                          onPressed: _busy
+                              ? null
+                              : () => _showReviewDialog(o, status),
                           icon: const Icon(Icons.star_outline),
-                          label: const Text('Đánh giá giao dịch'),
+                          label: Text(label),
                         ),
                       );
                     },

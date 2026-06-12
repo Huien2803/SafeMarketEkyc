@@ -61,4 +61,28 @@ export class UserProfileDto {
 
   @ApiProperty({ type: EkycSummaryDto })
   ekyc: EkycSummaryDto;
+
+  @ApiProperty({ example: 2 })
+  activeListingCount: number;
+
+  @ApiProperty({ example: 1 })
+  soldCount: number;
+
+  @ApiProperty({ example: 3 })
+  boughtCount: number;
+
+  @ApiProperty({ example: 5 })
+  reviewCount: number;
+
+  @ApiProperty({ example: 4.5 })
+  averageRating: number;
+
+  @ApiProperty({ example: 12 })
+  followerCount: number;
+
+  @ApiProperty({ example: 5 })
+  followingCount: number;
+
+  @ApiProperty({ example: false })
+  isFollowing: boolean;
 }

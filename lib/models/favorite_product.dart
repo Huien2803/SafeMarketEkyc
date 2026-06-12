@@ -7,6 +7,7 @@ class FavoriteProduct {
     required this.seller,
     required this.location,
     this.trustScore = 0,
+    this.thumbnailUrl,
   });
 
   final String id;
@@ -15,6 +16,9 @@ class FavoriteProduct {
   final String seller;
   final String location;
   final int trustScore;
+  final String? thumbnailUrl;
+
+  int get productId => int.tryParse(id) ?? 0;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -23,6 +27,7 @@ class FavoriteProduct {
         'seller': seller,
         'location': location,
         'trustScore': trustScore,
+        if (thumbnailUrl != null) 'thumbnailUrl': thumbnailUrl,
       };
 
   factory FavoriteProduct.fromJson(Map<String, dynamic> json) {
@@ -33,6 +38,7 @@ class FavoriteProduct {
       seller: json['seller'] as String,
       location: json['location'] as String,
       trustScore: (json['trustScore'] as num?)?.toInt() ?? 0,
+      thumbnailUrl: json['thumbnailUrl'] as String?,
     );
   }
 }

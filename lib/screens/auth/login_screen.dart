@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
+import 'package:safemarket_app/screens/admin_dashboard.dart';
 import 'package:safemarket_app/screens/auth/register_screen.dart';
 import 'package:safemarket_app/screens/marketplace_home.dart';
 import 'package:safemarket_app/services/auth_service.dart';
@@ -46,7 +47,9 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
-          builder: (_) => const MarketplaceHomeScreen(),
+          builder: (_) => auth.user.isAdmin
+              ? const AdminDashboardScreen()
+              : const MarketplaceHomeScreen(),
         ),
       );
     } on AuthException catch (e) {
@@ -198,7 +201,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const Divider(height: 32),
                   const Text(
-                    'Java API: mvn spring-boot:run (port 5214) — không cần Node.js\n'
+                    'Backend NestJS: cd backend && npm run start:dev (port 3000)\n'
                     'Demo: an.nguyen@email.com / 123456 · admin@safemarket.vn / admin123',
                     textAlign: TextAlign.center,
                     style: TextStyle(

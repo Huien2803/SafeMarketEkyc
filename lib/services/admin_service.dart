@@ -11,59 +11,79 @@ import 'package:safemarket_app/services/auth_service.dart';
 
 
 class AdminStats {
-
   const AdminStats({
-
     required this.totalUsers,
-
     required this.verifiedUsers,
-
     required this.openReports,
-
     required this.lockedUsers,
-
+    this.pendingEkyc = 0,
+    this.totalProducts = 0,
+    this.totalOrders = 0,
+    this.completedOrders = 0,
+    this.ekycTrend = const [],
   });
 
-
-
   final int totalUsers;
-
   final int verifiedUsers;
-
   final int openReports;
-
   final int lockedUsers;
-
-
+  final int pendingEkyc;
+  final int totalProducts;
+  final int totalOrders;
+  final int completedOrders;
+  final List<EkycTrendPoint> ekycTrend;
 
   factory AdminStats.fromJson(Map<String, dynamic> json) {
-
+    final trendRaw = json['ekycTrend'] as List<dynamic>? ?? [];
     return AdminStats(
-
       totalUsers: (json['totalUsers'] as num?)?.toInt() ?? 0,
-
       verifiedUsers: (json['verifiedUsers'] as num?)?.toInt()
-
           ?? (json['ekycVerifiedCount'] as num?)?.toInt()
-
           ?? 0,
-
       openReports: (json['openReports'] as num?)?.toInt()
-
           ?? (json['openReportsCount'] as num?)?.toInt()
-
           ?? 0,
-
       lockedUsers: (json['lockedUsers'] as num?)?.toInt()
-
           ?? (json['lockedAccountsCount'] as num?)?.toInt()
-
           ?? 0,
-
+      pendingEkyc: (json['pendingEkyc'] as num?)?.toInt() ?? 0,
+      totalProducts: (json['totalProducts'] as num?)?.toInt() ?? 0,
+      totalOrders: (json['totalOrders'] as num?)?.toInt() ?? 0,
+      completedOrders: (json['completedOrders'] as num?)?.toInt() ?? 0,
+      ekycTrend: trendRaw
+          .map((e) => EkycTrendPoint.fromJson(e as Map<String, dynamic>))
+          .toList(),
     );
-
   }
 
+  String toReportText() {
+    return '''
+BÁO CÁO HỆ THỐNG SAFEMARKET
+────────────────────────────
+Tổng người dùng: $totalUsers
+Đã xác thực eKYC: $verifiedUsers
+eKYC chờ duyệt: $pendingEkyc
+Báo cáo vi phạm (mở): $openReports
+Tài khoản bị khóa: $lockedUsers
+Tổng sản phẩm: $totalProducts
+Tổng đơn hàng: $totalOrders
+Giao dịch hoàn tất: $completedOrders
+''';
+  }
+}
+
+class EkycTrendPoint {
+  const EkycTrendPoint({required this.label, required this.count});
+
+  final String label;
+  final int count;
+
+  factory EkycTrendPoint.fromJson(Map<String, dynamic> json) {
+    return EkycTrendPoint(
+      label: json['label'] as String? ?? '',
+      count: (json['count'] as num?)?.toInt() ?? 0,
+    );
+  }
 }
 
 
@@ -147,33 +167,41 @@ class AdminService {
 
 
   Map<String, String> get _headers {
-
     final token = AuthService.instance.accessToken;
-
     return {
-
       'Accept': 'application/json',
-
       'Content-Type': 'application/json',
-
       if (token != null) 'Authorization': 'Bearer $token',
-
     };
+  }
 
+  String _errorFromResponse(http.Response res, String fallback) {
+    try {
+      final body = jsonDecode(res.body);
+      if (body is Map && body['message'] != null) {
+        final msg = body['message'];
+        if (msg is String) return msg;
+        if (msg is List && msg.isNotEmpty) return msg.first.toString();
+      }
+    } catch (_) {}
+    return '$fallback (${res.statusCode})';
   }
 
 
 
   Future<AdminStats> getStats() async {
-
     final uri = Uri.parse('${ApiConfig.baseUrl}/admin/stats');
-
     final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
-
-    if (res.statusCode != 200) throw Exception('Lỗi tải thống kê');
-
+    if (res.statusCode == 401) {
+      throw Exception('Phiên đăng nhập hết hạn — vui lòng đăng nhập lại');
+    }
+    if (res.statusCode == 403) {
+      throw Exception('Tài khoản không có quyền admin');
+    }
+    if (res.statusCode != 200) {
+      throw Exception('Lỗi tải thống kê (${res.statusCode})');
+    }
     return AdminStats.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
-
   }
 
 
@@ -253,37 +281,21 @@ class AdminService {
 
 
   Future<void> approveEkyc(int userId) async {
-
     final uri = Uri.parse('${ApiConfig.baseUrl}/admin/ekyc/$userId/approve');
-
     final res = await http.post(uri, headers: _headers).timeout(ApiConfig.timeout);
-
     if (res.statusCode < 200 || res.statusCode >= 300) {
-
-      throw Exception('Không phê duyệt được eKYC');
-
+      throw Exception(_errorFromResponse(res, 'Không phê duyệt được eKYC'));
     }
-
   }
 
-
-
   Future<void> rejectEkyc(int userId, String reason) async {
-
     final uri = Uri.parse('${ApiConfig.baseUrl}/admin/ekyc/$userId/reject');
-
     final res = await http
-
         .post(uri, headers: _headers, body: jsonEncode({'reason': reason}))
-
         .timeout(ApiConfig.timeout);
-
     if (res.statusCode < 200 || res.statusCode >= 300) {
-
-      throw Exception('Không từ chối được eKYC');
-
+      throw Exception(_errorFromResponse(res, 'Không từ chối được eKYC'));
     }
-
   }
 
 

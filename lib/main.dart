@@ -1,5 +1,7 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:safemarket_app/core/theme/app_theme.dart';
+import 'package:safemarket_app/firebase_options.dart';
 import 'package:safemarket_app/screens/admin_dashboard.dart';
 import 'package:safemarket_app/screens/auth/auth_gate.dart';
 import 'package:safemarket_app/screens/auth/login_screen.dart';
@@ -9,12 +11,18 @@ import 'package:safemarket_app/screens/marketplace_home.dart';
 import 'package:safemarket_app/screens/product_detail.dart';
 import 'package:safemarket_app/screens/profile_screen.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    debugPrint('Firebase init: $e — cấu hình firebase_options.dart + google-services.json');
+  }
   runApp(const SafeMarketApp());
 }
 
-/// Ứng dụng gốc SafeMarket — Material 3, theme theo thiết kế mẫu.
 class SafeMarketApp extends StatelessWidget {
   const SafeMarketApp({super.key});
 

@@ -55,21 +55,16 @@ export class AuthService {
   }
 
   async login(dto: LoginDto): Promise<AuthResponseDto> {
-    const user = await this.userRepo.findOne({
-      where: [{ email: dto.identifier }, { phoneNumber: dto.identifier }],
-    });
+    const loginId = (dto.identifier ?? dto.email ?? '').trim();
+    if (!loginId) {
+      throw new UnauthorizedException('Email/SĐT hoặc mật khẩu không đúng');
+    }
+    const user = await this.findUserByLoginId(loginId);
     if (!user) {
       throw new UnauthorizedException('Email/SĐT hoặc mật khẩu không đúng');
     }
 
-    let ok = await bcrypt.compare(dto.password, user.passwordHash);
-    // Hỗ trợ mật khẩu demo từ eKYC Market.sql (HASH_DEMO / HASH_REPLACE_IN_PRODUCTION)
-    if (!ok) {
-      ok =
-        (user.passwordHash === 'HASH_DEMO' && dto.password === '123456') ||
-        (user.passwordHash === 'HASH_REPLACE_IN_PRODUCTION' &&
-          dto.password === 'admin123');
-    }
+    const ok = await this.verifyPassword(dto.password, user.passwordHash);
     if (!ok) {
       throw new UnauthorizedException('Email/SĐT hoặc mật khẩu không đúng');
     }
@@ -83,6 +78,30 @@ export class AuthService {
     }
 
     return this.buildAuthResponse(user);
+  }
+
+  /** Mật khẩu seed SQL (HASH_DEMO / HASH_REPLACE_IN_PRODUCTION) cho môi trường demo. */
+  private async verifyPassword(plain: string, hash: string): Promise<boolean> {
+    if (hash === 'HASH_DEMO' && plain === '123456') return true;
+    if (hash === 'HASH_REPLACE_IN_PRODUCTION' && plain === 'admin123') {
+      return true;
+    }
+    if (!hash.startsWith('$2')) return false;
+    return bcrypt.compare(plain, hash);
+  }
+
+  /** Tránh bind email dài vào cột phone_number (varchar 15) — lỗi TDS SQL Server. */
+  private async findUserByLoginId(loginId: string): Promise<User | null> {
+    if (loginId.includes('@')) {
+      return this.userRepo.findOne({ where: { email: loginId } });
+    }
+    if (loginId.length <= 15) {
+      const byPhone = await this.userRepo.findOne({
+        where: { phoneNumber: loginId },
+      });
+      if (byPhone) return byPhone;
+    }
+    return this.userRepo.findOne({ where: { email: loginId } });
   }
 
   private buildAuthResponse(user: User): AuthResponseDto {

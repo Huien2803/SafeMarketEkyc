@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "968535993886",
+    "firebase_url": "https://safemarketekyc-default-rtdb.firebaseio.com",
+    "project_id": "safemarketekyc",
+    "storage_bucket": "safemarketekyc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:968535993886:android:9f7ca688df4c5627d6880f",
+        "android_client_info": {
+          "package_name": "com.example.safemarket_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyANG0nWA34BBllZqVOrXsL4eEjBKkDG-uc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

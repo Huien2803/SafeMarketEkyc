@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
 import 'package:safemarket_app/models/app_notification.dart';
+import 'package:safemarket_app/screens/product_detail.dart';
+import 'package:safemarket_app/screens/public_profile_screen.dart';
 import 'package:safemarket_app/services/notification_service.dart';
 
 class NotificationsScreen extends StatefulWidget {
@@ -15,7 +17,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   void initState() {
     super.initState();
-    NotificationService.instance.load();
+    NotificationService.instance.syncFromApi();
     NotificationService.instance.addListener(_onChanged);
   }
 
@@ -26,6 +28,33 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   void _onChanged() => setState(() {});
+
+  Future<void> _onTapNotification(
+    BuildContext context,
+    AppNotification n,
+  ) async {
+    await NotificationService.instance.markRead(n.id);
+    if (!context.mounted) return;
+
+    if (n.productId != null &&
+        (n.type == 'NEW_PRODUCT' || n.type == 'PRODUCT_SOLD')) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => ProductDetailScreen(productId: n.productId!),
+        ),
+      );
+      return;
+    }
+    if (n.sellerId != null) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => PublicProfileScreen(userId: n.sellerId!),
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -60,7 +89,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 final n = items[index];
                 return _NotificationTile(
                   notification: n,
-                  onTap: () => NotificationService.instance.markRead(n.id),
+                  onTap: () => _onTapNotification(context, n),
                 );
               },
             ),

@@ -1,0 +1,98 @@
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { User } from '../entities/user.entity';
+import { OrdersService } from './orders.service';
+import {
+  CancelOrderDto,
+  CreateOrderDto,
+  DisputeOrderDto,
+} from './dto/order.dto';
+
+@ApiTags('orders')
+@ApiBearerAuth('JWT-auth')
+@UseGuards(AuthGuard('jwt'))
+@Controller('orders')
+export class OrdersController {
+  constructor(private readonly ordersService: OrdersService) {}
+
+  @Post()
+  @ApiOperation({ summary: 'Tạo đơn mua hàng' })
+  create(@CurrentUser() user: User, @Body() dto: CreateOrderDto) {
+    return this.ordersService.createOrder(Number(user.userId), dto);
+  }
+
+  @Get('my')
+  @ApiOperation({ summary: 'Đơn hàng của tôi (mua + bán)' })
+  myOrders(@CurrentUser() user: User) {
+    return this.ordersService.getMyOrders(Number(user.userId));
+  }
+
+  @Get(':orderId')
+  @ApiOperation({ summary: 'Chi tiết đơn hàng' })
+  getOne(
+    @CurrentUser() user: User,
+    @Param('orderId', ParseIntPipe) orderId: number,
+  ) {
+    return this.ordersService.getOrder(orderId, Number(user.userId));
+  }
+
+  @Post(':orderId/ship')
+  ship(
+    @CurrentUser() user: User,
+    @Param('orderId', ParseIntPipe) orderId: number,
+  ) {
+    return this.ordersService.markShipped(orderId, Number(user.userId));
+  }
+
+  @Post(':orderId/confirm-payment')
+  confirmPayment(
+    @CurrentUser() user: User,
+    @Param('orderId', ParseIntPipe) orderId: number,
+  ) {
+    return this.ordersService.confirmPayment(orderId, Number(user.userId));
+  }
+
+  @Post(':orderId/confirm-handover')
+  confirmHandover(
+    @CurrentUser() user: User,
+    @Param('orderId', ParseIntPipe) orderId: number,
+  ) {
+    return this.ordersService.confirmHandover(orderId, Number(user.userId));
+  }
+
+  @Post(':orderId/complete')
+  complete(
+    @CurrentUser() user: User,
+    @Param('orderId', ParseIntPipe) orderId: number,
+  ) {
+    return this.ordersService.complete(orderId, Number(user.userId));
+  }
+
+  @Post(':orderId/cancel')
+  cancel(
+    @CurrentUser() user: User,
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Body() dto: CancelOrderDto,
+  ) {
+    return this.ordersService.cancel(orderId, Number(user.userId), dto);
+  }
+
+  @Post(':orderId/dispute')
+  dispute(
+    @CurrentUser() user: User,
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Body() dto: DisputeOrderDto,
+  ) {
+    return this.ordersService.dispute(orderId, Number(user.userId), dto);
+  }
+}

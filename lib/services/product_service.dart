@@ -11,11 +11,29 @@ class ProductService {
   ProductService._();
   static final ProductService instance = ProductService._();
 
+  /// NestJS trả `[...]`; một số bản cũ trả `{ items: [...] }`.
+  List<dynamic> _parseListResponse(String body, String label) {
+    final decoded = jsonDecode(body);
+    if (decoded is List<dynamic>) return decoded;
+    if (decoded is Map<String, dynamic>) {
+      final items = decoded['items'];
+      if (items is List<dynamic>) return items;
+      final msg = decoded['message'];
+      final text = msg is List
+          ? msg.join(', ')
+          : (msg is String ? msg : 'Phản hồi không hợp lệ từ $label');
+      throw Exception(text);
+    }
+    throw Exception('Không đọc được dữ liệu $label');
+  }
+
   Future<List<ProductCategory>> getCategories() async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/products/categories');
     final res = await http.get(uri).timeout(ApiConfig.timeout);
-    if (res.statusCode != 200) return [];
-    final list = jsonDecode(res.body) as List<dynamic>;
+    if (res.statusCode != 200) {
+      throw Exception('Không tải danh mục (${res.statusCode})');
+    }
+    final list = _parseListResponse(res.body, 'danh mục');
     return list
         .map((e) => ProductCategory.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -42,7 +60,7 @@ class ProductService {
     if (res.statusCode != 200) {
       throw Exception('Không tải được sản phẩm (${res.statusCode})');
     }
-    final list = jsonDecode(res.body) as List<dynamic>;
+    final list = _parseListResponse(res.body, 'sản phẩm');
     return list
         .map((e) => ProductListItem.fromJson(e as Map<String, dynamic>))
         .toList();

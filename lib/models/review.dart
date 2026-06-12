@@ -42,12 +42,14 @@ class OrderReviewStatus {
     required this.buyerReviewed,
     required this.sellerReviewed,
     required this.revieweeId,
+    this.revieweeName,
   });
 
   final bool canReview;
   final bool buyerReviewed;
   final bool sellerReviewed;
   final int revieweeId;
+  final String? revieweeName;
 
   factory OrderReviewStatus.fromJson(Map<String, dynamic> json) {
     return OrderReviewStatus(
@@ -55,6 +57,7 @@ class OrderReviewStatus {
       buyerReviewed: json['buyerReviewed'] as bool? ?? false,
       sellerReviewed: json['sellerReviewed'] as bool? ?? false,
       revieweeId: (json['revieweeId'] as num?)?.toInt() ?? 0,
+      revieweeName: json['revieweeName'] as String?,
     );
   }
 }

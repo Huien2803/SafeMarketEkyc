@@ -30,20 +30,43 @@ class ProductListItem {
   final String? thumbnailUrl;
 
   factory ProductListItem.fromJson(Map<String, dynamic> json) {
+    final seller = json['seller'] as Map<String, dynamic>?;
+    final price = (json['price'] as num).toInt();
+    final id = (json['id'] as num?)?.toInt() ??
+        (json['productId'] as num?)?.toInt() ??
+        0;
+    final sellerName = json['sellerName'] as String? ??
+        seller?['displayName'] as String? ??
+        seller?['email'] as String? ??
+        'Người bán';
+    final trustScore = (json['trustScore'] as num?)?.toInt() ??
+        (seller?['trustScore'] as num?)?.toInt() ??
+        500;
+    final kyc = seller?['kycStatus'] as String?;
     return ProductListItem(
-      id: (json['id'] as num).toInt(),
+      id: id,
       title: json['title'] as String,
-      price: (json['price'] as num).toInt(),
-      priceFormatted: json['priceFormatted'] as String? ?? '',
+      price: price,
+      priceFormatted: json['priceFormatted'] as String? ??
+          _formatVnd(price),
       location: json['location'] as String? ?? '',
       conditionPct: (json['conditionPct'] as num?)?.toInt() ?? 100,
-      sellerName: json['sellerName'] as String? ?? 'Người bán',
-      trustScore: (json['trustScore'] as num?)?.toInt() ?? 500,
-      sellerVerified: json['sellerVerified'] as bool? ?? false,
+      sellerName: sellerName,
+      trustScore: trustScore,
+      sellerVerified: json['sellerVerified'] as bool? ??
+          (kyc == 'Verified'),
       categoryName: json['categoryName'] as String? ?? '',
       categoryId: (json['categoryId'] as num?)?.toInt() ?? 0,
       thumbnailUrl: json['thumbnailUrl'] as String?,
     );
+  }
+
+  static String _formatVnd(int amount) {
+    final s = amount.toString().replaceAllMapped(
+          RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+          (m) => '${m[1]}.',
+        );
+    return '$s đ';
   }
 }
 
@@ -77,12 +100,17 @@ class ProductDetail {
   factory ProductDetail.fromJson(Map<String, dynamic> json) {
     final sellerJson = json['seller'] as Map<String, dynamic>? ?? {};
     final rawImages = json['imageUrls'];
+    final price = (json['price'] as num).toInt();
+    final id = (json['id'] as num?)?.toInt() ??
+        (json['productId'] as num?)?.toInt() ??
+        0;
     return ProductDetail(
-      id: (json['id'] as num).toInt(),
+      id: id,
       title: json['title'] as String,
       description: json['description'] as String? ?? '',
-      price: (json['price'] as num).toInt(),
-      priceFormatted: json['priceFormatted'] as String? ?? '',
+      price: price,
+      priceFormatted: json['priceFormatted'] as String? ??
+          ProductListItem._formatVnd(price),
       location: json['location'] as String? ?? '',
       conditionPct: (json['conditionPct'] as num?)?.toInt() ?? 100,
       status: json['status'] as String? ?? 'Available',
@@ -93,6 +121,10 @@ class ProductDetail {
           : const [],
     );
   }
+
+  bool get isAvailable => status == 'Available';
+  bool get isSold => status == 'Sold';
+  bool get isPurchasable => status == 'Available';
 }
 
 class ProductCategory {

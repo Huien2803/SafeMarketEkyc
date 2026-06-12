@@ -51,6 +51,7 @@ class ReviewService {
         buyerReviewed: false,
         sellerReviewed: false,
         revieweeId: 0,
+        revieweeName: null,
       );
     }
     return OrderReviewStatus.fromJson(

@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:safemarket_app/core/constants/app_decorations.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
+import 'package:safemarket_app/screens/marketplace_home.dart';
 import 'package:safemarket_app/services/admin_service.dart';
+import 'package:safemarket_app/services/auth_service.dart';
+import 'package:printing/printing.dart';
+import 'package:safemarket_app/utils/admin_report_pdf.dart';
 import 'package:safemarket_app/widgets/trust_score_bar.dart';
 
 /// Màn hình SafeAdmin — dashboard quản trị Web/Tablet responsive.
@@ -20,6 +24,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   List<Map<String, dynamic>> _pendingEkyc = [];
   List<Map<String, dynamic>> _lockedUsers = [];
   bool _loading = true;
+  String? _loadError;
+  String _searchQuery = '';
 
   static const _menuItems = [
     _MenuItem('Tổng quan', Icons.dashboard_outlined),
@@ -33,30 +39,141 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   @override
   void initState() {
     super.initState();
+    if (!(AuthService.instance.currentUser?.isAdmin ?? false)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Chỉ tài khoản admin mới truy cập được')),
+        );
+        Navigator.of(context).maybePop();
+      });
+      return;
+    }
     _load();
   }
 
+  List<AdminUserRow> get _filteredUsers {
+    final q = _searchQuery.trim().toLowerCase();
+    if (q.isEmpty) return _users;
+    return _users.where((u) {
+      final name = (u.displayName ?? '').toLowerCase();
+      final email = u.email.toLowerCase();
+      return name.contains(q) || email.contains(q);
+    }).toList();
+  }
+
   Future<void> _load() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
     try {
-      final stats = await AdminService.instance.getStats();
-      final users = await AdminService.instance.getUsers();
-      final reports = await AdminService.instance.getReports();
-      final pending = await AdminService.instance.getPendingEkyc();
-      final locked = await AdminService.instance.getLockedUsers();
+      final results = await Future.wait([
+        AdminService.instance.getStats(),
+        AdminService.instance.getUsers(),
+        AdminService.instance.getReports(),
+        AdminService.instance.getPendingEkyc(),
+        AdminService.instance.getLockedUsers(),
+      ]);
       if (!mounted) return;
       setState(() {
-        _stats = stats;
-        _users = users;
-        _reports = reports;
-        _pendingEkyc = pending;
-        _lockedUsers = locked;
+        _stats = results[0] as AdminStats;
+        _users = results[1] as List<AdminUserRow>;
+        _reports = results[2] as List<Map<String, dynamic>>;
+        _pendingEkyc = results[3] as List<Map<String, dynamic>>;
+        _lockedUsers = results[4] as List<Map<String, dynamic>>;
         _loading = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
+      // Thử tải từng phần nếu stats lỗi — vẫn hiển thị user/báo cáo
+      try {
+        final users = await AdminService.instance.getUsers();
+        final reports = await AdminService.instance.getReports();
+        final pending = await AdminService.instance.getPendingEkyc();
+        final locked = await AdminService.instance.getLockedUsers();
+        if (!mounted) return;
+        setState(() {
+          _users = users;
+          _reports = reports;
+          _pendingEkyc = pending;
+          _lockedUsers = locked;
+          _loadError = '$e';
+        });
+      } catch (_) {
+        setState(() => _loadError = '$e');
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Không tải được dữ liệu admin: $e')),
+      );
     }
+  }
+
+  Future<void> _exportReport() async {
+    if (!mounted) return;
+
+    if (_stats == null) {
+      await _load();
+      if (!mounted) return;
+    }
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('Đang tạo báo cáo PDF...'),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final bytes = await AdminReportPdf.buildDashboardReport(
+        stats: _stats,
+        users: _users,
+        reports: _reports,
+        pendingEkyc: _pendingEkyc,
+        lockedUsers: _lockedUsers,
+      );
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+
+      final fileName = AdminReportPdf.fileName();
+      await Printing.sharePdf(bytes: bytes, filename: fileName);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Đã xuất $fileName')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Không xuất được PDF: $e')),
+      );
+    }
+  }
+
+  void _goToApp() {
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pop();
+      return;
+    }
+    navigator.pushReplacement(
+      MaterialPageRoute<void>(builder: (_) => const MarketplaceHomeScreen()),
+    );
   }
 
   @override
@@ -71,21 +188,43 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             selectedIndex: _selectedMenu,
             items: _menuItems,
             onSelect: (i) => setState(() => _selectedMenu = i),
+            onBackToApp: _goToApp,
           ),
           Expanded(
             child: Column(
               children: [
-                _AdminHeader(showMenuButton: !isWide),
+                _AdminHeader(
+                  showMenuButton: !isWide,
+                  searchQuery: _searchQuery,
+                  onSearchChanged: (v) => setState(() => _searchQuery = v),
+                  onRefresh: _load,
+                  onBackToApp: _goToApp,
+                ),
+                if (_loadError != null)
+                  MaterialBanner(
+                    content: Text(_loadError!),
+                    actions: [
+                      TextButton(onPressed: _load, child: const Text('Thử lại')),
+                    ],
+                  ),
                 Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _PageTitleRow(menuIndex: _selectedMenu),
-                        const SizedBox(height: 24),
-                        _buildMenuContent(),
-                      ],
+                  child: RefreshIndicator(
+                    onRefresh: _load,
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _PageTitleRow(
+                            menuIndex: _selectedMenu,
+                            onExport: _exportReport,
+                            onRefresh: _load,
+                          ),
+                          const SizedBox(height: 24),
+                          _buildMenuContent(),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -104,6 +243,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   setState(() => _selectedMenu = i);
                   Navigator.pop(context);
                 },
+                onBackToApp: _goToApp,
               ),
             ),
     );
@@ -112,7 +252,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget _buildMenuContent() {
     switch (_selectedMenu) {
       case 1:
-        return _UsersTableCard(users: _users, loading: _loading, onLock: _lockUser, onUnlock: _unlockUser);
+        return _UsersTableCard(
+          users: _filteredUsers,
+          loading: _loading,
+          onLock: _lockUser,
+          onUnlock: _unlockUser,
+        );
       case 2:
         return _PendingEkycCard(
           items: _pendingEkyc,
@@ -146,7 +291,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Expanded(flex: 7, child: _EkycChartCard()),
+                      Expanded(
+                        flex: 7,
+                        child: _EkycChartCard(trend: _stats?.ekycTrend ?? []),
+                      ),
                       const SizedBox(width: 16),
                       Expanded(flex: 3, child: _RecentReportsCard(reports: _reports)),
                     ],
@@ -154,7 +302,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 }
                 return Column(
                   children: [
-                    const _EkycChartCard(),
+                    _EkycChartCard(trend: _stats?.ekycTrend ?? []),
                     const SizedBox(height: 16),
                     _RecentReportsCard(reports: _reports),
                   ],
@@ -162,7 +310,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               },
             ),
             const SizedBox(height: 24),
-            _UsersTableCard(users: _users, loading: _loading),
+            _UsersTableCard(users: _filteredUsers, loading: _loading),
           ],
         );
     }
@@ -236,11 +384,13 @@ class _AdminSidebar extends StatelessWidget {
     required this.selectedIndex,
     required this.items,
     required this.onSelect,
+    required this.onBackToApp,
   });
 
   final int selectedIndex;
   final List<_MenuItem> items;
   final ValueChanged<int> onSelect;
+  final VoidCallback onBackToApp;
 
   @override
   Widget build(BuildContext context) {
@@ -323,6 +473,22 @@ class _AdminSidebar extends StatelessWidget {
               },
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: onBackToApp,
+                  icon: const Icon(Icons.arrow_back, size: 18),
+                  label: const Text('Về SafeMarket'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 44),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -331,17 +497,38 @@ class _AdminSidebar extends StatelessWidget {
 
 /// Header: tìm kiếm + thông báo + avatar admin.
 class _AdminHeader extends StatelessWidget {
-  const _AdminHeader({required this.showMenuButton});
+  const _AdminHeader({
+    required this.showMenuButton,
+    required this.searchQuery,
+    required this.onSearchChanged,
+    required this.onRefresh,
+    required this.onBackToApp,
+  });
 
   final bool showMenuButton;
+  final String searchQuery;
+  final ValueChanged<String> onSearchChanged;
+  final VoidCallback onRefresh;
+  final VoidCallback onBackToApp;
 
   @override
   Widget build(BuildContext context) {
+    final admin = AuthService.instance.currentUser;
+    final adminName = admin?.displayName ?? admin?.email ?? 'Admin';
+    final initials = adminName.trim().isNotEmpty
+        ? adminName.trim().substring(0, 1).toUpperCase()
+        : 'A';
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
       color: AppColors.white,
       child: Row(
         children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back),
+            tooltip: 'Về SafeMarket',
+            onPressed: onBackToApp,
+          ),
           if (showMenuButton)
             Builder(
               builder: (ctx) => IconButton(
@@ -351,9 +538,16 @@ class _AdminHeader extends StatelessWidget {
             ),
           Expanded(
             child: TextField(
+              onChanged: onSearchChanged,
               decoration: InputDecoration(
-                hintText: 'Tìm kiếm người dùng, giao dịch...',
+                hintText: 'Tìm kiếm người dùng theo tên hoặc email...',
                 prefixIcon: Icon(Icons.search, color: AppColors.textMuted),
+                suffixIcon: searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: () => onSearchChanged(''),
+                      )
+                    : null,
                 filled: true,
                 fillColor: AppColors.background,
                 border: OutlineInputBorder(
@@ -364,7 +558,12 @@ class _AdminHeader extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 16),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Làm mới',
+            onPressed: onRefresh,
+          ),
+          const SizedBox(width: 8),
           IconButton(
             icon: const Icon(Icons.notifications_outlined),
             onPressed: () {},
@@ -374,9 +573,9 @@ class _AdminHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                'Admin Quản trị',
-                style: TextStyle(
+              Text(
+                adminName,
+                style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                   color: AppColors.textPrimary,
@@ -396,7 +595,7 @@ class _AdminHeader extends StatelessWidget {
           CircleAvatar(
             backgroundColor: const Color(0xFFBFDBFE),
             child: Text(
-              'AD',
+              initials,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: AppColors.primary,
@@ -411,8 +610,14 @@ class _AdminHeader extends StatelessWidget {
 }
 
 class _PageTitleRow extends StatelessWidget {
-  const _PageTitleRow({required this.menuIndex});
+  const _PageTitleRow({
+    required this.menuIndex,
+    required this.onExport,
+    required this.onRefresh,
+  });
   final int menuIndex;
+  final VoidCallback onExport;
+  final VoidCallback onRefresh;
 
   String get _title {
     switch (menuIndex) {
@@ -460,12 +665,18 @@ class _PageTitleRow extends StatelessWidget {
           ),
         ),
         ElevatedButton.icon(
-          onPressed: () {},
-          icon: const Icon(Icons.description_outlined, size: 18),
-          label: const Text('Xuất báo cáo'),
+          onPressed: onExport,
+          icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+          label: const Text('Xuất PDF'),
           style: ElevatedButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           ),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          onPressed: onRefresh,
+          icon: const Icon(Icons.refresh),
+          tooltip: 'Làm mới dữ liệu',
         ),
       ],
     );
@@ -499,7 +710,7 @@ class _StatsCardsRow extends StatelessWidget {
             value: '${s?.totalUsers ?? 0}',
             icon: Icons.people,
             iconColor: AppColors.primary,
-            change: 'SQL',
+            change: 'Live',
             changePositive: true,
             isNeutralChange: true,
           ),
@@ -508,8 +719,17 @@ class _StatsCardsRow extends StatelessWidget {
             value: '${s?.verifiedUsers ?? 0}',
             icon: Icons.shield,
             iconColor: AppColors.primary,
-            change: 'live',
+            change: 'Verified',
             changePositive: true,
+            isNeutralChange: true,
+          ),
+          _StatCardData(
+            title: 'eKYC chờ duyệt',
+            value: '${s?.pendingEkyc ?? 0}',
+            icon: Icons.pending_actions,
+            iconColor: AppColors.warning,
+            change: 'Pending',
+            changePositive: false,
             isNeutralChange: true,
           ),
           _StatCardData(
@@ -517,7 +737,7 @@ class _StatsCardsRow extends StatelessWidget {
             value: '${s?.openReports ?? 0}',
             icon: Icons.warning_amber_rounded,
             iconColor: AppColors.warning,
-            change: 'open',
+            change: 'Open',
             changePositive: false,
             isNeutralChange: true,
           ),
@@ -526,8 +746,17 @@ class _StatsCardsRow extends StatelessWidget {
             value: '${s?.lockedUsers ?? 0}',
             icon: Icons.person_off_outlined,
             iconColor: AppColors.danger,
-            change: '+1',
+            change: 'Locked',
             changePositive: false,
+            isNeutralChange: true,
+          ),
+          _StatCardData(
+            title: 'Giao dịch hoàn tất',
+            value: '${s?.completedOrders ?? 0}',
+            icon: Icons.check_circle_outline,
+            iconColor: AppColors.trustGreen,
+            change: '${s?.totalOrders ?? 0} đơn',
+            changePositive: true,
             isNeutralChange: true,
           ),
         ];
@@ -634,13 +863,26 @@ class _StatCard extends StatelessWidget {
 
 /// Biểu đồ cột eKYC — CustomPainter không dùng thư viện ngoài.
 class _EkycChartCard extends StatelessWidget {
-  const _EkycChartCard();
+  const _EkycChartCard({required this.trend});
 
-  static const _labels = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
-  static const _values = [0.45, 0.62, 0.55, 0.78, 0.68, 0.85, 0.72];
+  final List<EkycTrendPoint> trend;
 
   @override
   Widget build(BuildContext context) {
+    final points = trend.isNotEmpty
+        ? trend
+        : const [
+            EkycTrendPoint(label: 'T2', count: 0),
+            EkycTrendPoint(label: 'T3', count: 0),
+            EkycTrendPoint(label: 'T4', count: 0),
+            EkycTrendPoint(label: 'T5', count: 0),
+            EkycTrendPoint(label: 'T6', count: 0),
+            EkycTrendPoint(label: 'T7', count: 0),
+            EkycTrendPoint(label: 'CN', count: 0),
+          ];
+    final maxCount = points.map((p) => p.count).fold(0, (a, b) => a > b ? a : b);
+    final scale = maxCount > 0 ? maxCount.toDouble() : 1.0;
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: AppDecorations.card(),
@@ -651,7 +893,7 @@ class _EkycChartCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                'Biến động Định danh eKYC',
+                'eKYC được duyệt (7 ngày)',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
@@ -664,13 +906,9 @@ class _EkycChartCard extends StatelessWidget {
                   border: Border.all(color: const Color(0xFFE5E7EB)),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('Tuần này', style: TextStyle(fontSize: 12)),
-                    SizedBox(width: 4),
-                    Icon(Icons.keyboard_arrow_down, size: 18),
-                  ],
+                child: Text(
+                  'Tổng: ${points.fold<int>(0, (s, p) => s + p.count)}',
+                  style: const TextStyle(fontSize: 12),
                 ),
               ),
             ],
@@ -680,18 +918,29 @@ class _EkycChartCard extends StatelessWidget {
             height: 200,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
-              children: List.generate(_labels.length, (i) {
+              children: List.generate(points.length, (i) {
+                final p = points[i];
+                final heightFactor = p.count / scale;
                 return Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
+                        if (p.count > 0)
+                          Text(
+                            '${p.count}',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
                         Expanded(
                           child: Align(
                             alignment: Alignment.bottomCenter,
                             child: FractionallySizedBox(
-                              heightFactor: _values[i],
+                              heightFactor: heightFactor.clamp(0.05, 1.0),
                               child: Container(
                                 width: double.infinity,
                                 decoration: BoxDecoration(
@@ -706,7 +955,7 @@ class _EkycChartCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          _labels[i],
+                          p.label,
                           style: const TextStyle(
                             fontSize: 11,
                             color: AppColors.textMuted,
@@ -1092,10 +1341,17 @@ class _PendingEkycCard extends StatelessWidget {
           else
             ...items.map((e) {
               final userId = (e['userId'] as num).toInt();
+              final hasProfile = e['hasProfile'] as bool? ?? true;
+              final fullName = e['fullName'] as String? ?? '';
+              final idNumber = e['idNumber'] as String? ?? '';
+              final subtitle = hasProfile && (fullName.isNotEmpty || idNumber.isNotEmpty)
+                  ? '$fullName • $idNumber'
+                  : hasProfile
+                      ? 'Đã nộp hồ sơ'
+                      : 'Chưa có file CMND — duyệt theo trạng thái tài khoản';
               return ListTile(
                 title: Text(e['displayName'] as String? ?? ''),
-                subtitle: Text(
-                    '${e['fullName'] ?? ''} • ${e['idNumber'] ?? ''}'),
+                subtitle: Text(subtitle),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -1226,8 +1482,12 @@ class _SystemReportCard extends StatelessWidget {
           const SizedBox(height: 16),
           Text('Tổng người dùng: ${s?.totalUsers ?? 0}'),
           Text('Đã eKYC: ${s?.verifiedUsers ?? 0}'),
+          Text('eKYC chờ duyệt: ${s?.pendingEkyc ?? 0}'),
           Text('Báo cáo mở: ${s?.openReports ?? 0}'),
           Text('Tài khoản khóa: ${s?.lockedUsers ?? 0}'),
+          Text('Tổng sản phẩm: ${s?.totalProducts ?? 0}'),
+          Text('Tổng đơn hàng: ${s?.totalOrders ?? 0}'),
+          Text('Giao dịch hoàn tất: ${s?.completedOrders ?? 0}'),
         ],
       ),
     );

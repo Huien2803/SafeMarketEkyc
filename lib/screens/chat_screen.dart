@@ -1,8 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
 import 'package:safemarket_app/models/chat.dart';
 import 'package:safemarket_app/screens/order_detail_screen.dart';
+import 'package:safemarket_app/services/api_config.dart';
 import 'package:safemarket_app/services/chat_service.dart';
+import 'package:safemarket_app/services/chat_upload_service.dart';
+import 'package:safemarket_app/widgets/chat_product_card.dart';
 import 'package:safemarket_app/widgets/purchase_method_dialog.dart';
 import 'package:safemarket_app/widgets/product_thumbnail.dart';
 
@@ -14,7 +20,7 @@ class ChatScreen extends StatefulWidget {
     this.subtitle,
   });
 
-  final int threadId;
+  final String threadId;
   final String peerName;
   final String? subtitle;
 
@@ -24,34 +30,39 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final _controller = TextEditingController();
-  List<ChatMessage> _messages = [];
   ChatThreadDetail? _thread;
-  bool _loading = true;
+  bool _loadingThread = true;
   bool _busy = false;
+  StreamSubscription<List<ChatMessage>>? _msgSub;
+  List<ChatMessage> _messages = [];
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _loadThread();
+    ChatService.instance.markThreadRead(widget.threadId);
+    _msgSub = ChatService.instance
+        .watchMessages(widget.threadId)
+        .listen((list) {
+      if (!mounted) return;
+      setState(() => _messages = list);
+      ChatService.instance.markThreadRead(widget.threadId);
+    });
   }
 
   @override
   void dispose() {
+    _msgSub?.cancel();
     _controller.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  Future<void> _loadThread() async {
+    setState(() => _loadingThread = true);
     try {
-      final detail = await ChatService.instance.getThreadDetail(widget.threadId);
-      final list = await ChatService.instance.getMessages(widget.threadId);
-      if (mounted) {
-        setState(() {
-          _thread = detail;
-          _messages = list;
-        });
-      }
+      final detail =
+          await ChatService.instance.getThreadDetail(widget.threadId);
+      if (mounted) setState(() => _thread = detail);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -59,7 +70,7 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() => _loadingThread = false);
     }
   }
 
@@ -71,16 +82,39 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final result =
           await ChatService.instance.sendMessage(widget.threadId, text);
-      if (mounted) setState(() => _messages = result.messages);
-      if (mounted && result.scamWarning != null) {
+      if (result.scamWarning != null && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            backgroundColor: Colors.orange.shade800,
-            duration: const Duration(seconds: 6),
             content: Text(result.scamWarning!),
+            backgroundColor: AppColors.warning,
           ),
         );
       }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _pickAndSendImage() async {
+    if (_busy) return;
+    final picker = ImagePicker();
+    final file = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 1600,
+      imageQuality: 85,
+    );
+    if (file == null || !mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      final path = await ChatUploadService.instance.uploadChatImage(file);
+      await ChatService.instance.sendImage(widget.threadId, path);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -105,7 +139,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     setState(() => _busy = true);
     try {
-      final list = await ChatService.instance.sendPurchaseRequest(
+      await ChatService.instance.sendPurchaseRequest(
         widget.threadId,
         choice.address,
         paymentMethod: choice.method.paymentMethod,
@@ -114,10 +148,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final detail =
           await ChatService.instance.getThreadDetail(widget.threadId);
       if (mounted) {
-        setState(() {
-          _messages = list;
-          _thread = detail;
-        });
+        setState(() => _thread = detail);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Đã gửi yêu cầu mua — chờ người bán xác nhận'),
@@ -140,17 +171,11 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_busy || !msg.isPendingPurchase) return;
     setState(() => _busy = true);
     try {
-      final list = await ChatService.instance.confirmSale(
-        widget.threadId,
-        msg.messageId,
-      );
+      await ChatService.instance.confirmSale(widget.threadId, msg.messageId);
       final detail =
           await ChatService.instance.getThreadDetail(widget.threadId);
       if (mounted) {
-        setState(() {
-          _messages = list;
-          _thread = detail;
-        });
+        setState(() => _thread = detail);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Đã xác nhận bán — đơn hàng đã tạo'),
@@ -178,12 +203,22 @@ class _ChatScreenState extends State<ChatScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.peerName),
+            Row(
+              children: [
+                Expanded(child: Text(widget.peerName)),
+                if (!_loadingThread)
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      color: AppColors.trustGreen,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+              ],
+            ),
             if (widget.subtitle != null)
-              Text(
-                widget.subtitle!,
-                style: const TextStyle(fontSize: 12),
-              ),
+              Text(widget.subtitle!, style: const TextStyle(fontSize: 12)),
           ],
         ),
         backgroundColor: AppColors.white,
@@ -192,18 +227,19 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          if (t != null && t.productId != null) _ProductStrip(
-            thread: t,
-            busy: _busy,
-            onPurchase: _purchaseInChat,
-          ),
+          if (t != null && t.productId != null)
+            _ProductStrip(
+              thread: t,
+              busy: _busy,
+              onPurchase: _purchaseInChat,
+            ),
           Expanded(
-            child: _loading
+            child: _loadingThread && _messages.isEmpty
                 ? const Center(child: CircularProgressIndicator())
                 : _messages.isEmpty
                     ? const Center(
                         child: Text(
-                          'Bắt đầu trò chuyện — có thể đặt mua ngay trong chat',
+                          'Bắt đầu trò chuyện — tin nhắn đồng bộ realtime qua Firebase',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: AppColors.textMuted),
                         ),
@@ -224,6 +260,11 @@ class _ChatScreenState extends State<ChatScreen> {
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
               child: Row(
                 children: [
+                  IconButton(
+                    onPressed: _busy ? null : _pickAndSendImage,
+                    icon: const Icon(Icons.image_outlined),
+                    tooltip: 'Gửi ảnh',
+                  ),
                   Expanded(
                     child: TextField(
                       controller: _controller,
@@ -258,6 +299,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 }
 
+// _ProductStrip, _MessageBubble, _SpecialCard — giữ nguyên từ bản cũ
 class _ProductStrip extends StatelessWidget {
   const _ProductStrip({
     required this.thread,
@@ -364,6 +406,62 @@ class _MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (message.isProductCard) {
+      return Align(
+        alignment: message.mine ? Alignment.centerRight : Alignment.centerLeft,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: ChatProductCard(meta: message.meta, mine: message.mine),
+        ),
+      );
+    }
+
+    if (message.isImage) {
+      final rawUrl = message.meta['imageUrl'] as String? ?? '';
+      final url = ApiConfig.mediaUrl(rawUrl);
+      return Align(
+        alignment: message.mine ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.sizeOf(context).width * 0.65,
+          ),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: message.mine
+                  ? AppColors.primary.withValues(alpha: 0.3)
+                  : AppColors.textMuted.withValues(alpha: 0.3),
+            ),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: url.isNotEmpty
+              ? Image.network(
+                  url,
+                  fit: BoxFit.cover,
+                  loadingBuilder: (_, child, progress) {
+                    if (progress == null) return child;
+                    return const SizedBox(
+                      height: 120,
+                      width: 120,
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  },
+                  errorBuilder: (_, _, _) => const SizedBox(
+                    height: 100,
+                    width: 100,
+                    child: Icon(Icons.broken_image_outlined),
+                  ),
+                )
+              : const SizedBox(
+                  height: 100,
+                  width: 100,
+                  child: Icon(Icons.image_not_supported_outlined),
+                ),
+        ),
+      );
+    }
+
     if (message.isPurchaseRequest || message.isSaleConfirmed) {
       return _SpecialCard(
         message: message,

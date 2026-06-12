@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
 import 'package:safemarket_app/screens/marketplace_home.dart';
 import 'package:safemarket_app/services/auth_service.dart';
+import 'package:safemarket_app/utils/input_validators.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -22,7 +24,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _showPassword = false;
   bool _loading = false;
 
-  static final _phoneRegex = RegExp(r'^(0|\+84)[0-9]{9,10}$');
   static final _emailRegex = RegExp(r'^[\w.+-]+@[\w-]+\.[\w.-]+$');
 
   @override
@@ -116,22 +117,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   controller: _displayNameCtrl,
                   label: 'Họ và tên',
                   icon: Icons.badge_outlined,
-                  validator: (v) => (v == null || v.trim().isEmpty)
-                      ? 'Vui lòng nhập họ tên'
-                      : null,
+                  textCapitalization: TextCapitalization.words,
+                  validator: InputValidators.displayName,
                 ),
                 const SizedBox(height: 12),
                 _buildField(
                   controller: _phoneCtrl,
-                  label: 'Số điện thoại',
+                  label: 'Số điện thoại (10 số)',
                   icon: Icons.phone_outlined,
                   keyboardType: TextInputType.phone,
-                  validator: (v) {
-                    final t = v?.trim() ?? '';
-                    if (t.isEmpty) return 'Vui lòng nhập SĐT';
-                    if (!_phoneRegex.hasMatch(t)) return 'SĐT không hợp lệ';
-                    return null;
-                  },
+                  inputFormatters: const [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(10),
+                  ],
+                  validator: InputValidators.vnPhoneNumber,
                 ),
                 const SizedBox(height: 12),
                 _buildField(
@@ -154,6 +153,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   validator: (_) => null,
                 ),
                 const SizedBox(height: 12),
+                const Text(
+                  'Mật khẩu ≥8 ký tự: chữ hoa, chữ thường, số và ký tự đặc biệt.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 8),
                 _buildField(
                   controller: _passwordCtrl,
                   label: 'Mật khẩu',
@@ -168,11 +175,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     onPressed: () =>
                         setState(() => _showPassword = !_showPassword),
                   ),
-                  validator: (v) {
-                    if (v == null || v.isEmpty) return 'Vui lòng nhập mật khẩu';
-                    if (v.length < 6) return 'Mật khẩu tối thiểu 6 ký tự';
-                    return null;
-                  },
+                  validator: InputValidators.strongPassword,
                 ),
                 const SizedBox(height: 12),
                 _buildField(
@@ -251,11 +254,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
     TextInputType? keyboardType,
     bool obscureText = false,
     Widget? suffix,
+    List<TextInputFormatter>? inputFormatters,
+    TextCapitalization textCapitalization = TextCapitalization.none,
   }) {
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
       obscureText: obscureText,
+      inputFormatters: inputFormatters,
+      textCapitalization: textCapitalization,
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(icon),

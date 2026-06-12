@@ -95,3 +95,44 @@ Content-Type: {{contentType}}
 
 ### 6.4. Truy cập /me không có token
 GET {{baseUrl}}/users/me
+
+###
+
+# ============================================
+# 7. Phase 4 — Sản phẩm & Giao dịch (không giỏ hàng)
+# ============================================
+
+### 7.1. Danh mục sản phẩm
+GET {{baseUrl}}/categories
+
+### 7.2. Danh sách sản phẩm (tất cả)
+GET {{baseUrl}}/products
+
+### 7.3. Lọc theo danh mục + tìm kiếm
+GET {{baseUrl}}/products?categoryId=1&search=iphone&page=1&limit=20
+
+### 7.4. Chi tiết sản phẩm
+GET {{baseUrl}}/products/1
+
+### 7.5. Liên hệ mua trực tiếp (tạo đơn Pending — KHÔNG qua giỏ hàng)
+POST {{baseUrl}}/orders/contact
+Content-Type: {{contentType}}
+Authorization: Bearer {{token}}
+
+{
+  "productId": 2,
+  "note": "Giao tại Quận 1, chiều thứ 7"
+}
+
+### 7.6. Lịch sử mua hàng của tôi
+GET {{baseUrl}}/orders/my-purchases
+Authorization: Bearer {{token}}
+
+### 7.7. Lịch sử bán hàng của tôi
+GET {{baseUrl}}/orders/my-sales
+Authorization: Bearer {{token}}
+
+### 7.8. Thống kê giao dịch (Profile)
+GET {{baseUrl}}/orders/my-stats
+Authorization: Bearer {{token}}
+

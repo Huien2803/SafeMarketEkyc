@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:safemarket_app/core/constants/app_decorations.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
@@ -13,7 +15,9 @@ import 'package:safemarket_app/services/favorites_service.dart';
 import 'package:safemarket_app/services/notification_service.dart';
 import 'package:safemarket_app/screens/post_product_screen.dart';
 import 'package:safemarket_app/services/auth_service.dart';
+import 'package:safemarket_app/services/chat_service.dart';
 import 'package:safemarket_app/services/user_service.dart';
+import 'package:safemarket_app/widgets/count_badge.dart';
 import 'package:safemarket_app/widgets/product_thumbnail.dart';
 import 'package:safemarket_app/widgets/trust_gauge.dart';
 
@@ -36,6 +40,22 @@ class MarketplaceHomeScreen extends StatefulWidget {
 class _MarketplaceHomeScreenState extends State<MarketplaceHomeScreen> {
   int _bottomIndex = 0;
   final _homeTabKey = GlobalKey<_HomeTabState>();
+  StreamSubscription<int>? _chatUnreadSub;
+  int _chatUnread = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _chatUnreadSub = ChatService.instance.watchTotalUnread().listen((count) {
+      if (mounted) setState(() => _chatUnread = count);
+    });
+  }
+
+  @override
+  void dispose() {
+    _chatUnreadSub?.cancel();
+    super.dispose();
+  }
 
   void _switchTab(int index) {
     if (_bottomIndex == index) return;
@@ -125,6 +145,7 @@ class _MarketplaceHomeScreenState extends State<MarketplaceHomeScreen> {
                   icon: Icons.chat_bubble_outline,
                   label: 'CHAT',
                   selected: _bottomIndex == 2,
+                  badgeCount: _chatUnread,
                   onTap: () => _switchTab(2),
                 ),
                 _NavItem(
@@ -279,8 +300,9 @@ class _HomeTabState extends State<_HomeTab>
                         const SizedBox(height: 12),
                         Text(_error!, textAlign: TextAlign.center),
                         const SizedBox(height: 12),
-                        const Text(
-                          'Chạy Java API (port 5214) rồi thử lại',
+                        Text(
+                          'Chạy backend NestJS: cd backend && npm run start:dev (port 3000)',
+                          textAlign: TextAlign.center,
                           style: TextStyle(color: AppColors.textSecondary),
                         ),
                         FilledButton(
@@ -356,25 +378,21 @@ class _HomeTabState extends State<_HomeTab>
             ),
           ),
           const Spacer(),
-          Stack(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.notifications_outlined),
-                onPressed: _openNotifications,
-              ),
-              Positioned(
-                right: 12,
-                top: 12,
-                child: Container(
-                  width: 8,
-                  height: 8,
-                  decoration: const BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
+          ListenableBuilder(
+            listenable: NotificationService.instance,
+            builder: (context, _) {
+              final unread = NotificationService.instance.unreadCount;
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.notifications_outlined),
+                    onPressed: _openNotifications,
                   ),
-                ),
-              ),
-            ],
+                  CountBadge(count: unread, top: 8, right: 8),
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -639,6 +657,7 @@ class _ProductCard extends StatelessWidget {
         seller: product.sellerName,
         location: product.location,
         trustScore: product.trustScore,
+        thumbnailUrl: product.thumbnailUrl,
       );
 
   @override
@@ -826,12 +845,14 @@ class _NavItem extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.badgeCount = 0,
   });
 
   final IconData icon;
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final int badgeCount;
 
   @override
   Widget build(BuildContext context) {
@@ -842,7 +863,13 @@ class _NavItem extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: color, size: 24),
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Icon(icon, color: color, size: 24),
+              CountBadge(count: badgeCount, top: -4, right: -10),
+            ],
+          ),
           const SizedBox(height: 2),
           Text(
             label,

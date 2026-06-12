@@ -8,16 +8,22 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import {
+  DISPLAY_NAME_MESSAGE,
+  DISPLAY_NAME_PATTERN,
+  STRONG_PASSWORD_MESSAGE,
+  STRONG_PASSWORD_PATTERN,
+  VN_PHONE_MESSAGE,
+  VN_PHONE_PATTERN,
+} from '../../common/validation.constants';
 
 export class RegisterDto {
   @ApiProperty({
-    example: '0359599503',
-    description: 'Số điện thoại Việt Nam (10 số)',
+    example: '0912345678',
+    description: 'Số điện thoại Việt Nam (10 chữ số, bắt đầu 0)',
   })
   @IsNotEmpty({ message: 'Số điện thoại không được trống' })
-  @Matches(/^(0|\+84)[0-9]{9,10}$/, {
-    message: 'Số điện thoại không hợp lệ',
-  })
+  @Matches(VN_PHONE_PATTERN, { message: VN_PHONE_MESSAGE })
   phoneNumber: string;
 
   @ApiProperty({ example: 'hien@huflit.edu.vn' })
@@ -26,18 +32,20 @@ export class RegisterDto {
 
   @ApiProperty({
     example: 'MatKhau@123',
-    description: 'Mật khẩu tối thiểu 6 ký tự',
+    description: STRONG_PASSWORD_MESSAGE,
   })
   @IsString()
-  @MinLength(6, { message: 'Mật khẩu tối thiểu 6 ký tự' })
+  @Matches(STRONG_PASSWORD_PATTERN, { message: STRONG_PASSWORD_MESSAGE })
   @MaxLength(72, { message: 'Mật khẩu tối đa 72 ký tự' })
   password: string;
 
-  @ApiProperty({ example: 'Trương Trí Hiền', required: false })
-  @IsOptional()
+  @ApiProperty({ example: 'Trương Trí Hiền' })
+  @IsNotEmpty({ message: 'Họ và tên không được trống' })
   @IsString()
+  @MinLength(2, { message: 'Họ và tên tối thiểu 2 ký tự' })
   @MaxLength(100)
-  displayName?: string;
+  @Matches(DISPLAY_NAME_PATTERN, { message: DISPLAY_NAME_MESSAGE })
+  displayName: string;
 
   @ApiProperty({ example: 'TP.HCM', required: false })
   @IsOptional()

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:safemarket_app/core/constants/app_decorations.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
+import 'package:safemarket_app/screens/product_detail.dart';
 import 'package:safemarket_app/services/favorites_service.dart';
+import 'package:safemarket_app/widgets/product_thumbnail.dart';
 
 /// Tab Yêu thích — danh sách sản phẩm đã lưu (SharedPreferences).
 class FavoritesTab extends StatefulWidget {
@@ -26,6 +28,16 @@ class _FavoritesTabState extends State<FavoritesTab> {
   }
 
   void _onChanged() => setState(() {});
+
+  void _openProduct(int productId) {
+    if (productId <= 0) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => ProductDetailScreen(productId: productId),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -82,57 +94,68 @@ class _FavoritesTabState extends State<FavoritesTab> {
                         ),
                         onDismissed: (_) =>
                             FavoritesService.instance.remove(p.id),
-                        child: Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: AppDecorations.card(),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 56,
-                                height: 56,
-                                decoration: BoxDecoration(
-                                  color: AppColors.primary
-                                      .withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: const Icon(
-                                  Icons.favorite,
-                                  color: AppColors.primary,
-                                ),
+                        child: Material(
+                          color: AppColors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          child: InkWell(
+                            onTap: () => _openProduct(p.productId),
+                            borderRadius: BorderRadius.circular(16),
+                            child: Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: AppDecorations.card(),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 72,
+                                    height: 72,
+                                    child: ProductThumbnail(
+                                      thumbnailUrl: p.thumbnailUrl,
+                                      iconSize: 28,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          p.price,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w800,
+                                            color: AppColors.primary,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          p.name,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '${p.seller} · ${p.location}',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            color: AppColors.textSecondary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const Icon(
+                                    Icons.chevron_right,
+                                    color: AppColors.textMuted,
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      p.price,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                        color: AppColors.primary,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      p.name,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      '${p.seller} · ${p.location}',
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        color: AppColors.textSecondary,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                         ),
                       );
