@@ -5,9 +5,12 @@ import {
   Param,
   ParseIntPipe,
   Post,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { User } from '../entities/user.entity';
@@ -17,6 +20,11 @@ import {
   CreateOrderDto,
   DisputeOrderDto,
 } from './dto/order.dto';
+import {
+  orderProofFilter,
+  orderProofStorage,
+  toPublicOrderProofPath,
+} from './order-upload.config';
 
 @ApiTags('orders')
 @ApiBearerAuth('JWT-auth')
@@ -71,11 +79,23 @@ export class OrdersController {
   }
 
   @Post(':orderId/complete')
+  @ApiOperation({
+    summary: 'Người mua xác nhận đã nhận hàng kèm ảnh bằng chứng',
+  })
+  @UseInterceptors(
+    FileInterceptor('proof', {
+      storage: orderProofStorage,
+      fileFilter: orderProofFilter,
+      limits: { fileSize: 8 * 1024 * 1024 },
+    }),
+  )
   complete(
     @CurrentUser() user: User,
     @Param('orderId', ParseIntPipe) orderId: number,
+    @UploadedFile() file?: Express.Multer.File,
   ) {
-    return this.ordersService.complete(orderId, Number(user.userId));
+    const proofUrl = file?.filename ? toPublicOrderProofPath(file.filename) : null;
+    return this.ordersService.complete(orderId, Number(user.userId), proofUrl);
   }
 
   @Post(':orderId/cancel')

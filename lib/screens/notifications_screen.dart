@@ -112,6 +112,8 @@ class _NotificationTile extends StatelessWidget {
         return Icons.verified_user_outlined;
       case 'product':
         return Icons.shopping_bag_outlined;
+      case 'received':
+        return Icons.inventory_2_outlined;
       default:
         return Icons.notifications_outlined;
     }

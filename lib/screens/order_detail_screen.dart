@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:safemarket_app/core/constants/app_decorations.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
 import 'package:safemarket_app/models/order.dart';
 import 'package:safemarket_app/models/review.dart';
 import 'package:safemarket_app/screens/chat_screen.dart';
+import 'package:safemarket_app/services/api_config.dart';
 import 'package:safemarket_app/services/auth_service.dart';
 import 'package:safemarket_app/services/chat_service.dart';
 import 'package:safemarket_app/services/order_service.dart';
@@ -92,6 +94,61 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     });
   }
 
+  /// Người mua xác nhận đã nhận hàng: bắt buộc chụp/chọn ảnh bằng chứng.
+  Future<void> _confirmReceivedWithProof(OrderItem o) async {
+    if (_busy) return;
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Chụp ảnh xác nhận đã nhận hàng',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: const Text('Chụp ảnh'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Chọn từ thư viện'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+
+    final picker = ImagePicker();
+    final XFile? image = await picker.pickImage(
+      source: source,
+      imageQuality: 70,
+      maxWidth: 1600,
+    );
+    if (image == null || !mounted) return;
+
+    await _run(() async {
+      await OrderService.instance.markCompleted(o.orderId, proofImage: image);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Đã xác nhận nhận hàng. Người bán đã được thông báo.',
+            ),
+          ),
+        );
+      }
+    });
+  }
+
   Future<void> _run(Future<void> Function() action) async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -171,6 +228,52 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                if (o.receiptProofUrl != null &&
+                    o.receiptProofUrl!.isNotEmpty) ...[
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: AppDecorations.card(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.verified_outlined,
+                                size: 18, color: AppColors.trustGreen),
+                            const SizedBox(width: 8),
+                            Text(
+                              _isSeller(o)
+                                  ? 'Ảnh người mua xác nhận đã nhận hàng'
+                                  : 'Ảnh bạn đã gửi xác nhận nhận hàng',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.network(
+                            ApiConfig.mediaUrl(o.receiptProofUrl),
+                            width: double.infinity,
+                            height: 220,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(
+                              height: 220,
+                              color: AppColors.background,
+                              alignment: Alignment.center,
+                              child: const Icon(Icons.broken_image_outlined,
+                                  color: AppColors.textMuted),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 if (o.isShipOrder && o.orderStatus == 'Pending')
                   Container(
                     padding: const EdgeInsets.all(12),
@@ -250,15 +353,32 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                             (o.orderStatus == 'Paid' ||
                                 o.orderStatus == 'Shipped')) ||
                         (o.isDirectOrder && o.orderStatus == 'Paid'))) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.camera_alt_outlined,
+                            size: 18, color: AppColors.primary),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Cần chụp ảnh sản phẩm khi nhận để xác nhận. '
+                            'Ảnh sẽ gửi cho người bán làm bằng chứng.',
+                            style: TextStyle(fontSize: 12, height: 1.4),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                   FilledButton.icon(
-                    onPressed: _busy
-                        ? null
-                        : () => _run(() async {
-                              await OrderService.instance
-                                  .markCompleted(o.orderId);
-                            }),
-                    icon: const Icon(Icons.check_circle_outline),
-                    label: const Text('Đã nhận hàng — hoàn tất'),
+                    onPressed: _busy ? null : () => _confirmReceivedWithProof(o),
+                    icon: const Icon(Icons.photo_camera_outlined),
+                    label: const Text('Chụp ảnh & xác nhận đã nhận hàng'),
                   ),
                   if (o.isShipOrder) ...[
                     const SizedBox(height: 8),

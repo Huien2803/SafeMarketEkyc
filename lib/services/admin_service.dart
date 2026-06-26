@@ -158,6 +158,47 @@ class AdminUserRow {
 
 
 
+class AdminRankRow {
+  const AdminRankRow({
+    required this.rank,
+    required this.userId,
+    required this.email,
+    required this.displayName,
+    required this.kycStatus,
+    required this.accountStatus,
+    required this.trustScore,
+    required this.rankLevel,
+    required this.verified,
+    this.orders = 0,
+  });
+
+  final int rank;
+  final int userId;
+  final String email;
+  final String? displayName;
+  final String kycStatus;
+  final String accountStatus;
+  final int trustScore;
+  final String rankLevel;
+  final bool verified;
+  final int orders;
+
+  factory AdminRankRow.fromJson(Map<String, dynamic> json) {
+    return AdminRankRow(
+      rank: (json['rank'] as num?)?.toInt() ?? 0,
+      userId: (json['userId'] as num).toInt(),
+      email: json['email'] as String? ?? '',
+      displayName: json['displayName'] as String?,
+      kycStatus: json['kycStatus'] as String? ?? 'Unverified',
+      accountStatus: json['accountStatus'] as String? ?? 'Active',
+      trustScore: (json['trustScore'] as num?)?.toInt() ?? 0,
+      rankLevel: json['rankLevel'] as String? ?? 'Bronze',
+      verified: json['verified'] as bool? ?? (json['kycStatus'] == 'Verified'),
+      orders: (json['orders'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
 class AdminService {
 
   AdminService._();
@@ -225,6 +266,21 @@ class AdminService {
   }
 
 
+
+  /// Xếp hạng người dùng theo điểm tín nhiệm.
+  /// [descending] = true: cao → thấp (mặc định); false: thấp → cao.
+  /// Người đã xác thực eKYC luôn xếp trên người chưa xác thực.
+  Future<List<AdminRankRow>> getUserRanking({bool descending = true}) async {
+    final order = descending ? 'desc' : 'asc';
+    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/ranking?order=$order');
+    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
+    if (res.statusCode != 200) {
+      throw Exception(_errorFromResponse(res, 'Không tải được bảng xếp hạng'));
+    }
+    return (jsonDecode(res.body) as List<dynamic>)
+        .map((e) => AdminRankRow.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
 
   Future<List<Map<String, dynamic>>> getReports() async {
 

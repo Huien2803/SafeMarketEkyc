@@ -19,6 +19,8 @@ class OrderItem {
     this.disputeNote,
     required this.createdAt,
     this.completedAt,
+    this.receiptProofUrl,
+    this.receivedAt,
     this.escrowStatus,
     this.escrowAmount = 0,
     this.buyerReviewed = false,
@@ -44,6 +46,8 @@ class OrderItem {
   final String? disputeNote;
   final DateTime createdAt;
   final DateTime? completedAt;
+  final String? receiptProofUrl;
+  final DateTime? receivedAt;
   final String? escrowStatus;
   final int escrowAmount;
   final bool buyerReviewed;
@@ -89,6 +93,10 @@ class OrderItem {
       createdAt: DateTime.parse(json['createdAt'] as String),
       completedAt: json['completedAt'] != null
           ? DateTime.parse(json['completedAt'] as String)
+          : null,
+      receiptProofUrl: json['receiptProofUrl'] as String?,
+      receivedAt: json['receivedAt'] != null
+          ? DateTime.parse(json['receivedAt'] as String)
           : null,
       escrowStatus: json['escrowStatus'] as String?,
       escrowAmount: (json['escrowAmount'] as num?)?.toInt() ?? 0,

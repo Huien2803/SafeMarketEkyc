@@ -126,6 +126,55 @@ export class AdminService {
     return rows;
   }
 
+  /**
+   * Xếp hạng người dùng theo điểm tín nhiệm.
+   * - Người đã xác thực eKYC luôn xếp trên người chưa xác thực (chưa quét xếp chót).
+   * - Trong cùng nhóm: sắp theo điểm tín nhiệm (desc mặc định, asc khi đảo chiều).
+   */
+  async getUserRanking(order: 'desc' | 'asc' = 'desc') {
+    const users = await this.userRepo.find({
+      where: { isAdmin: false },
+    });
+
+    const rows: Record<string, unknown>[] = [];
+    for (const u of users) {
+      const score = await this.scoreRepo.findOne({
+        where: { userId: u.userId },
+      });
+      const completedOrders = await this.orderRepo.count({
+        where: { buyerId: u.userId, orderStatus: 'Completed' },
+      });
+      const verified = u.kycStatus === 'Verified';
+      rows.push({
+        userId: Number(u.userId),
+        email: u.email,
+        displayName: u.displayName,
+        kycStatus: u.kycStatus,
+        accountStatus: u.accountStatus,
+        trustScore: score?.currentPoint ?? 500,
+        rankLevel: score?.rankLevel ?? 'Bronze',
+        orders: completedOrders,
+        verified,
+      });
+    }
+
+    const dir = order === 'asc' ? 1 : -1;
+    rows.sort((a, b) => {
+      // eKYC verified luôn ưu tiên lên trên (chưa quét xếp chót).
+      const av = a.verified ? 1 : 0;
+      const bv = b.verified ? 1 : 0;
+      if (av !== bv) return bv - av;
+      const diff =
+        (a.trustScore as number) - (b.trustScore as number);
+      if (diff !== 0) return dir * diff;
+      return (a.displayName as string ?? '').localeCompare(
+        (b.displayName as string) ?? '',
+      );
+    });
+
+    return rows.map((r, i) => ({ ...r, rank: i + 1 }));
+  }
+
   async getReports() {
     const rows = await this.reportRepo.find({
       where: { status: 'Open' },

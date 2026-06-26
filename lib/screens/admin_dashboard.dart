@@ -23,6 +23,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   List<Map<String, dynamic>> _reports = [];
   List<Map<String, dynamic>> _pendingEkyc = [];
   List<Map<String, dynamic>> _lockedUsers = [];
+  List<AdminRankRow> _ranking = [];
+  bool _rankingDesc = true;
+  bool _rankingLoading = false;
   bool _loading = true;
   String? _loadError;
   String _searchQuery = '';
@@ -30,6 +33,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   static const _menuItems = [
     _MenuItem('Tổng quan', Icons.dashboard_outlined),
     _MenuItem('Người dùng', Icons.people_outline),
+    _MenuItem('Xếp hạng tín nhiệm', Icons.leaderboard_outlined),
     _MenuItem('Phê duyệt eKYC', Icons.verified_user_outlined),
     _MenuItem('Báo cáo vi phạm', Icons.report_outlined),
     _MenuItem('Danh sách đen', Icons.block_outlined),
@@ -74,6 +78,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         AdminService.instance.getReports(),
         AdminService.instance.getPendingEkyc(),
         AdminService.instance.getLockedUsers(),
+        AdminService.instance.getUserRanking(descending: _rankingDesc),
       ]);
       if (!mounted) return;
       setState(() {
@@ -82,6 +87,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _reports = results[2] as List<Map<String, dynamic>>;
         _pendingEkyc = results[3] as List<Map<String, dynamic>>;
         _lockedUsers = results[4] as List<Map<String, dynamic>>;
+        _ranking = results[5] as List<AdminRankRow>;
         _loading = false;
       });
     } catch (e) {
@@ -93,12 +99,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         final reports = await AdminService.instance.getReports();
         final pending = await AdminService.instance.getPendingEkyc();
         final locked = await AdminService.instance.getLockedUsers();
+        final ranking =
+            await AdminService.instance.getUserRanking(descending: _rankingDesc);
         if (!mounted) return;
         setState(() {
           _users = users;
           _reports = reports;
           _pendingEkyc = pending;
           _lockedUsers = locked;
+          _ranking = ranking;
           _loadError = '$e';
         });
       } catch (_) {
@@ -106,6 +115,29 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Không tải được dữ liệu admin: $e')),
+      );
+    }
+  }
+
+  Future<void> _setRankingOrder(bool descending) async {
+    if (_rankingLoading || descending == _rankingDesc) return;
+    setState(() {
+      _rankingDesc = descending;
+      _rankingLoading = true;
+    });
+    try {
+      final ranking =
+          await AdminService.instance.getUserRanking(descending: descending);
+      if (!mounted) return;
+      setState(() {
+        _ranking = ranking;
+        _rankingLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _rankingLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Không tải được bảng xếp hạng: $e')),
       );
     }
   }
@@ -259,25 +291,32 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           onUnlock: _unlockUser,
         );
       case 2:
+        return _RankingCard(
+          ranking: _ranking,
+          descending: _rankingDesc,
+          loading: _loading || _rankingLoading,
+          onOrderChanged: _setRankingOrder,
+        );
+      case 3:
         return _PendingEkycCard(
           items: _pendingEkyc,
           loading: _loading,
           onApprove: _approveEkyc,
           onReject: _rejectEkyc,
         );
-      case 3:
+      case 4:
         return _ReportsManageCard(
           reports: _reports,
           loading: _loading,
           onResolve: _resolveReport,
         );
-      case 4:
+      case 5:
         return _LockedUsersCard(
           users: _lockedUsers,
           loading: _loading,
           onUnlock: _unlockUser,
         );
-      case 5:
+      case 6:
         return _SystemReportCard(stats: _stats);
       default:
         return Column(
@@ -624,12 +663,14 @@ class _PageTitleRow extends StatelessWidget {
       case 1:
         return 'Quản lý người dùng';
       case 2:
-        return 'Phê duyệt eKYC';
+        return 'Xếp hạng tín nhiệm';
       case 3:
-        return 'Báo cáo vi phạm';
+        return 'Phê duyệt eKYC';
       case 4:
-        return 'Danh sách đen';
+        return 'Báo cáo vi phạm';
       case 5:
+        return 'Danh sách đen';
+      case 6:
         return 'Báo cáo hệ thống';
       default:
         return 'Tổng quan hệ thống';
@@ -1458,6 +1499,231 @@ class _LockedUsersCard extends StatelessWidget {
                 ),
               );
             }),
+        ],
+      ),
+    );
+  }
+}
+
+/// Bảng xếp hạng người dùng theo điểm tín nhiệm.
+/// eKYC đã xác thực xếp trên; chưa xác thực xếp chót. Có nút đảo chiều.
+class _RankingCard extends StatelessWidget {
+  const _RankingCard({
+    required this.ranking,
+    required this.descending,
+    required this.loading,
+    required this.onOrderChanged,
+  });
+
+  final List<AdminRankRow> ranking;
+  final bool descending;
+  final bool loading;
+  final ValueChanged<bool> onOrderChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final verified = ranking.where((r) => r.verified).toList();
+    final unverified = ranking.where((r) => !r.verified).toList();
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: AppDecorations.card(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Xếp hạng điểm tín nhiệm',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+              ),
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(
+                    value: true,
+                    label: Text('Cao → Thấp'),
+                    icon: Icon(Icons.arrow_downward, size: 16),
+                  ),
+                  ButtonSegment(
+                    value: false,
+                    label: Text('Thấp → Cao'),
+                    icon: Icon(Icons.arrow_upward, size: 16),
+                  ),
+                ],
+                selected: {descending},
+                onSelectionChanged: loading
+                    ? null
+                    : (s) => onOrderChanged(s.first),
+                style: ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  textStyle: WidgetStatePropertyAll(
+                    const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Người đã xác thực eKYC luôn xếp trên; người chưa quét eKYC xếp chót.',
+            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 16),
+          if (loading && ranking.isEmpty)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: CircularProgressIndicator(),
+              ),
+            )
+          else if (ranking.isEmpty)
+            const Text('Chưa có dữ liệu người dùng')
+          else ...[
+            _RankingGroupLabel(
+              label: 'Đã xác thực eKYC (${verified.length})',
+              color: AppColors.trustGreen,
+            ),
+            ...verified.map((r) => _RankingRow(row: r)),
+            if (unverified.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              _RankingGroupLabel(
+                label: 'Chưa quét eKYC — xếp chót (${unverified.length})',
+                color: AppColors.warning,
+              ),
+              ...unverified.map((r) => _RankingRow(row: r)),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _RankingGroupLabel extends StatelessWidget {
+  const _RankingGroupLabel({required this.label, required this.color});
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Container(width: 8, height: 8,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textSecondary,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RankingRow extends StatelessWidget {
+  const _RankingRow({required this.row});
+  final AdminRankRow row;
+
+  Color _rankColor() {
+    switch (row.rank) {
+      case 1:
+        return const Color(0xFFF59E0B);
+      case 2:
+        return const Color(0xFF9CA3AF);
+      case 3:
+        return const Color(0xFFB45309);
+      default:
+        return AppColors.textMuted;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final name = row.displayName ?? row.email;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 32,
+            child: Text(
+              '#${row.rank}',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: _rankColor(),
+              ),
+            ),
+          ),
+          CircleAvatar(
+            radius: 18,
+            backgroundColor: const Color(0xFFBFDBFE),
+            child: Text(
+              name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?',
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: AppColors.primary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        name,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _EkycBadge(verified: row.verified),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Text(
+                      '${row.trustScore} điểm · ${row.rankLevel}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${row.orders} giao dịch',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(width: 120, child: TrustScoreBar(score: row.trustScore)),
         ],
       ),
     );

@@ -9,7 +9,11 @@ import {
 } from 'typeorm';
 import { User } from './user.entity';
 
-export type NotificationType = 'NEW_PRODUCT' | 'PRODUCT_SOLD' | 'INFO';
+export type NotificationType =
+  | 'NEW_PRODUCT'
+  | 'PRODUCT_SOLD'
+  | 'ORDER_RECEIVED'
+  | 'INFO';
 
 @Entity({ schema: 'Market', name: 'Notifications' })
 @Index('IX_Notifications_User', ['userId', 'createdAt'])

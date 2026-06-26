@@ -47,6 +47,12 @@ export class Order {
   @Column({ name: 'cancel_reason', type: 'nvarchar', length: 255, nullable: true })
   cancelReason: string | null;
 
+  @Column({ name: 'receipt_proof_url', type: 'varchar', length: 500, nullable: true })
+  receiptProofUrl: string | null;
+
+  @Column({ name: 'received_at', type: 'datetime2', nullable: true })
+  receivedAt: Date | null;
+
   @Column({ name: 'buyer_id', type: 'bigint' })
   buyerId: number;
 

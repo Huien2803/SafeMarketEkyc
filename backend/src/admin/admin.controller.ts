@@ -5,6 +5,7 @@ import {
   Param,
   ParseIntPipe,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -27,6 +28,12 @@ export class AdminController {
   @Get('users')
   users() {
     return this.adminService.getUsers();
+  }
+
+  @Get('users/ranking')
+  userRanking(@Query('order') order?: string) {
+    const dir = order === 'asc' ? 'asc' : 'desc';
+    return this.adminService.getUserRanking(dir);
   }
 
   @Get('reports')

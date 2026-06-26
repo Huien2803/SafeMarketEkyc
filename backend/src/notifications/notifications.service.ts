@@ -91,6 +91,31 @@ export class NotificationsService {
     }
   }
 
+  /** Báo cho người bán: người mua đã xác nhận nhận hàng (kèm ảnh bằng chứng). */
+  async notifyOrderReceived(
+    sellerId: number,
+    data: {
+      orderId: number;
+      productId: number;
+      productTitle: string;
+      buyerName: string;
+      proofUrl: string | null;
+    },
+  ): Promise<void> {
+    await this.create(sellerId, {
+      type: 'ORDER_RECEIVED',
+      title: `${data.buyerName} đã xác nhận nhận hàng`,
+      body: `Đơn "${data.productTitle}" đã được người mua xác nhận nhận hàng kèm ảnh.`,
+      payload: {
+        orderId: data.orderId,
+        productId: data.productId,
+        productTitle: data.productTitle,
+        buyerName: data.buyerName,
+        proofUrl: data.proofUrl,
+      },
+    });
+  }
+
   private async create(
     userId: number,
     input: {

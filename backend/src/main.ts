@@ -7,6 +7,7 @@ import { join } from 'path';
 import { AppModule } from './app.module';
 import { ensureProductUploadDir } from './products/product-upload.config';
 import { ensureChatUploadDir } from './chat/chat-upload.config';
+import { ensureOrderUploadDir } from './orders/order-upload.config';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -16,6 +17,7 @@ async function bootstrap() {
   // Phục vụ ảnh upload từ thư mục backend/uploads/ tại http://host:3000/uploads/...
   ensureProductUploadDir();
   ensureChatUploadDir();
+  ensureOrderUploadDir();
   app.useStaticAssets(join(process.cwd(), 'uploads'), {
     prefix: '/uploads/',
   });

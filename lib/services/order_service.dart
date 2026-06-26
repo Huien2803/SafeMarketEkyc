@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:safemarket_app/models/order.dart';
 import 'package:safemarket_app/models/sold_listing.dart';
 import 'package:safemarket_app/services/api_config.dart';
@@ -94,8 +95,40 @@ class OrderService {
   Future<OrderItem> markDirectHandover(int orderId) async =>
       _postAction(orderId, 'confirm-handover');
 
-  Future<OrderItem> markCompleted(int orderId) async =>
-      _postAction(orderId, 'complete');
+  /// Người mua xác nhận đã nhận hàng kèm ảnh bằng chứng (bắt buộc).
+  Future<OrderItem> markCompleted(int orderId, {required XFile proofImage}) async {
+    final token = AuthService.instance.accessToken;
+    final uri = Uri.parse('${ApiConfig.baseUrl}/orders/$orderId/complete');
+    final req = http.MultipartRequest('POST', uri)
+      ..headers['Accept'] = 'application/json';
+    if (token != null) {
+      req.headers['Authorization'] = 'Bearer $token';
+    }
+
+    final bytes = await proofImage.readAsBytes();
+    req.files.add(
+      http.MultipartFile.fromBytes(
+        'proof',
+        bytes,
+        filename: proofImage.name.isNotEmpty ? proofImage.name : 'receipt.jpg',
+      ),
+    );
+
+    final streamed = await req.send().timeout(const Duration(seconds: 60));
+    final res = await http.Response.fromStream(streamed);
+    final body = res.body.isNotEmpty
+        ? jsonDecode(res.body) as Map<String, dynamic>
+        : <String, dynamic>{};
+
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      return OrderItem.fromJson(body);
+    }
+    final msg = body['message'];
+    if (msg is List && msg.isNotEmpty) {
+      throw Exception(msg.join('\n'));
+    }
+    throw Exception(msg is String ? msg : 'Không hoàn tất được đơn hàng');
+  }
 
   Future<OrderItem> cancelOrder(int orderId, {String reason = 'Hủy đơn'}) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/orders/$orderId/cancel');

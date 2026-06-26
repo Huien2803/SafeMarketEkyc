@@ -205,13 +205,25 @@ export class OrdersService {
     return this.toOrderJson(orderId);
   }
 
-  async complete(orderId: number, userId: number) {
+  async complete(orderId: number, userId: number, proofUrl?: string | null) {
     const order = await this.requireParticipant(orderId, userId);
     if (!['Paid', 'Shipped'].includes(order.orderStatus)) {
       throw new BadRequestException('Đơn chưa sẵn sàng hoàn tất');
     }
+
+    const isBuyer = Number(order.buyerId) === userId;
+    if (isBuyer && !proofUrl) {
+      throw new BadRequestException(
+        'Vui lòng chụp ảnh xác nhận đã nhận hàng trước khi hoàn tất',
+      );
+    }
+
     order.orderStatus = 'Completed';
     order.completedAt = new Date();
+    if (proofUrl) {
+      order.receiptProofUrl = proofUrl;
+      order.receivedAt = new Date();
+    }
     await this.orderRepo.save(order);
 
     const product = await this.productRepo.findOne({
@@ -224,6 +236,25 @@ export class OrdersService {
         Number(product.sellerId),
         product,
       );
+
+      // Báo trực tiếp cho người bán: người mua đã xác nhận nhận hàng (kèm ảnh).
+      if (isBuyer) {
+        const buyer = await this.userRepo.findOne({
+          where: { userId: order.buyerId },
+        });
+        const buyerName =
+          buyer?.displayName ?? buyer?.email ?? 'Người mua';
+        await this.notificationsService.notifyOrderReceived(
+          Number(product.sellerId),
+          {
+            orderId: Number(order.orderId),
+            productId: Number(product.productId),
+            productTitle: product.title,
+            buyerName,
+            proofUrl: proofUrl ?? null,
+          },
+        );
+      }
     }
 
     const payment = await this.paymentRepo.findOne({ where: { orderId } });
@@ -331,6 +362,8 @@ export class OrdersService {
       disputeNote: order.disputeNote,
       createdAt: order.createdAt.toISOString(),
       completedAt: order.completedAt?.toISOString() ?? null,
+      receiptProofUrl: order.receiptProofUrl ?? null,
+      receivedAt: order.receivedAt?.toISOString() ?? null,
       escrowStatus: payment?.escrowStatus ?? null,
       escrowAmount: payment ? Number(payment.amount) : 0,
       buyerReviewed,

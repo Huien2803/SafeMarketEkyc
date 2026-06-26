@@ -57,6 +57,8 @@ class AppNotification {
       case 'NEW_PRODUCT':
       case 'PRODUCT_SOLD':
         return 'product';
+      case 'ORDER_RECEIVED':
+        return 'received';
       default:
         return 'info';
     }
