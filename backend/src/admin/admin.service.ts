@@ -6,7 +6,8 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../entities/user.entity';
-import { Score } from '../entities/score.entity';
+import { Score, RankLevel } from '../entities/score.entity';
+import { PointLog } from '../entities/point-log.entity';
 import { Report } from '../entities/report.entity';
 import { EkycProfile } from '../entities/ekyc-profile.entity';
 import { Order } from '../entities/order.entity';
@@ -17,6 +18,7 @@ export class AdminService {
   constructor(
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(Score) private readonly scoreRepo: Repository<Score>,
+    @InjectRepository(PointLog) private readonly pointLogRepo: Repository<PointLog>,
     @InjectRepository(Report) private readonly reportRepo: Repository<Report>,
     @InjectRepository(EkycProfile) private readonly ekycRepo: Repository<EkycProfile>,
     @InjectRepository(Order) private readonly orderRepo: Repository<Order>,
@@ -178,7 +180,7 @@ export class AdminService {
   async getReports() {
     const rows = await this.reportRepo.find({
       where: { status: 'Open' },
-      relations: ['reported'],
+      relations: ['reported', 'reporter', 'product'],
       order: { createdAt: 'DESC' },
       take: 50,
     });
@@ -192,13 +194,28 @@ export class AdminService {
       }
       result.push({
         reportId: Number(r.reportId),
+        reportedUserId: uid,
+        reporterName:
+          r.reporter?.displayName ?? r.reporter?.email ?? 'Ẩn danh',
         name: r.reported?.displayName ?? r.reported?.email ?? 'User',
         reason: r.reason,
         severity: r.severity,
         score: scoreCache.get(uid),
+        productId: r.productId ? Number(r.productId) : null,
+        productTitle: r.product?.title ?? null,
+        reportType: r.productId ? 'product' : 'user',
+        createdAt: r.createdAt?.toISOString?.() ?? null,
       });
     }
     return result;
+  }
+
+  async hideReportedProduct(productId: number) {
+    const product = await this.productRepo.findOne({ where: { productId } });
+    if (!product) throw new NotFoundException('Sản phẩm không tồn tại');
+    product.status = 'Hidden';
+    await this.productRepo.save(product);
+    return { productId: Number(productId), status: 'Hidden' };
   }
 
   async getPendingEkyc() {
@@ -270,12 +287,74 @@ export class AdminService {
   }
 
   async lockUser(userId: number, reason: string) {
-    const user = await this.userRepo.findOne({ where: { userId } });
-    if (!user) throw new NotFoundException('User không tồn tại');
+    const user = await this.requireNonAdminUser(userId);
     user.accountStatus = 'Locked';
     user.lockReason = reason;
     user.lockedAt = new Date();
     await this.userRepo.save(user);
+  }
+
+  async banUser(userId: number, reason: string) {
+    const user = await this.requireNonAdminUser(userId);
+    user.accountStatus = 'Banned';
+    user.lockReason = reason;
+    user.lockedAt = new Date();
+    await this.userRepo.save(user);
+  }
+
+  async punishUser(userId: number, points: number, reason: string) {
+    const user = await this.requireNonAdminUser(userId);
+    if (points <= 0 || points > 500) {
+      throw new BadRequestException('Số điểm trừ phải từ 1 đến 500');
+    }
+
+    let score = await this.scoreRepo.findOne({ where: { userId } });
+    if (!score) {
+      score = this.scoreRepo.create({
+        userId,
+        currentPoint: 500,
+        rankLevel: 'Bronze',
+      });
+    }
+
+    const next = Math.max(0, score.currentPoint - points);
+    score.currentPoint = next;
+    score.rankLevel = this.rankFor(next);
+    await this.scoreRepo.save(score);
+    await this.pointLogRepo.save({
+      userId,
+      delta: -points,
+      reasonCode: 'ADMIN_PENALTY',
+      note: reason,
+    });
+
+    return {
+      userId: Number(user.userId),
+      trustScore: next,
+      rankLevel: score.rankLevel,
+      deducted: points,
+    };
+  }
+
+  async deleteUser(userId: number) {
+    const user = await this.requireNonAdminUser(userId);
+
+    const productCount = await this.productRepo.count({
+      where: { sellerId: userId },
+    });
+    const orderCount = await this.orderRepo.count({
+      where: { buyerId: userId },
+    });
+    if (productCount > 0 || orderCount > 0) {
+      throw new BadRequestException(
+        'Không thể xóa: người dùng còn sản phẩm hoặc đơn hàng. Hãy khóa/cấm thay thế.',
+      );
+    }
+
+    await this.ekycRepo.delete({ userId });
+    await this.scoreRepo.delete({ userId });
+    await this.pointLogRepo.delete({ userId });
+    await this.userRepo.delete({ userId });
   }
 
   async unlockUser(userId: number) {
@@ -293,5 +372,21 @@ export class AdminService {
     report.status = status;
     report.resolvedAt = new Date();
     await this.reportRepo.save(report);
+  }
+
+  private async requireNonAdminUser(userId: number): Promise<User> {
+    const user = await this.userRepo.findOne({ where: { userId } });
+    if (!user) throw new NotFoundException('User không tồn tại');
+    if (user.isAdmin) {
+      throw new BadRequestException('Không thể thao tác trên tài khoản admin');
+    }
+    return user;
+  }
+
+  private rankFor(point: number): RankLevel {
+    if (point >= 850) return 'Diamond';
+    if (point >= 600) return 'Gold';
+    if (point >= 300) return 'Silver';
+    return 'Bronze';
   }
 }

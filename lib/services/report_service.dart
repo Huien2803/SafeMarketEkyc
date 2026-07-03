@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:safemarket_app/core/constants/report_reasons.dart';
 import 'package:safemarket_app/services/api_config.dart';
 import 'package:safemarket_app/services/auth_service.dart';
 
@@ -10,13 +11,15 @@ class ReportService {
 
   Future<void> createReport({
     required int reportedId,
-    required String reason,
+    required String category,
+    required String detail,
     int? productId,
-    String severity = 'medium',
+    String? severity,
   }) async {
     final token = AuthService.instance.accessToken;
     if (token == null) throw Exception('Cần đăng nhập để báo cáo');
 
+    final cat = reportCategoryByCode(category);
     final uri = Uri.parse('${ApiConfig.baseUrl}/reports');
     final res = await http
         .post(
@@ -27,15 +30,19 @@ class ReportService {
           },
           body: jsonEncode({
             'reportedId': reportedId,
-            'reason': reason,
+            'category': category,
+            'detail': detail,
             if (productId != null) 'productId': productId,
-            'severity': severity,
+            'severity': severity ?? cat?.severity ?? 'medium',
           }),
         )
         .timeout(ApiConfig.timeout);
     if (res.statusCode < 200 || res.statusCode >= 300) {
       final body = jsonDecode(res.body) as Map<String, dynamic>;
-      throw Exception(body['message'] ?? 'Không gửi được báo cáo');
+      final msg = body['message'];
+      if (msg is String) throw Exception(msg);
+      if (msg is List && msg.isNotEmpty) throw Exception(msg.first.toString());
+      throw Exception('Không gửi được báo cáo');
     }
   }
 }

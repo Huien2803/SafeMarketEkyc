@@ -54,16 +54,25 @@ class OrderItem {
   final bool sellerReviewed;
 
   bool get isShipOrder =>
-      paymentMethod == 'BANK_TRANSFER' && deliveryMethod == 'SHIP';
+      (paymentMethod == 'BANK_TRANSFER' || paymentMethod == 'ONLINE_ESCROW') &&
+      deliveryMethod == 'SHIP';
 
-  bool get isDirectOrder => paymentMethod == 'CASH' && deliveryMethod == 'DIRECT';
+  bool get isDirectOrder =>
+      paymentMethod == 'CASH' && deliveryMethod == 'DIRECT';
+
+  bool get isDirectDelivery => deliveryMethod == 'DIRECT';
+
+  bool get isOnlineEscrow => paymentMethod == 'ONLINE_ESCROW';
+
+  bool get needsOnlinePayment =>
+      isOnlineEscrow && orderStatus == 'Pending' && escrowStatus == null;
 
   bool get isCompleted => orderStatus == 'Completed';
 
   String get methodSummary => '$paymentMethodLabel · $deliveryMethodLabel';
 
   String get addressLabel =>
-      isDirectOrder ? 'Địa điểm hẹn giao' : 'Địa chỉ nhận hàng';
+      isDirectDelivery ? 'Địa điểm hẹn giao' : 'Địa chỉ nhận hàng';
 
   factory OrderItem.fromJson(Map<String, dynamic> json) {
     final pay = json['paymentMethod'] as String? ?? 'CASH';
@@ -76,7 +85,11 @@ class OrderItem {
       deliveryMethod: del,
       paymentMethodLabel:
           json['paymentMethodLabel'] as String? ??
-              (pay == 'CASH' ? 'Tiền mặt' : 'Chuyển khoản'),
+              (pay == 'ONLINE_ESCROW'
+                  ? 'Thanh toán online (Escrow)'
+                  : pay == 'CASH'
+                      ? 'Tiền mặt'
+                      : 'Chuyển khoản'),
       deliveryMethodLabel:
           json['deliveryMethodLabel'] as String? ??
               (del == 'DIRECT' ? 'Giao trực tiếp' : 'Giao ship'),
@@ -108,22 +121,26 @@ class OrderItem {
   String get escrowLabel {
     switch (escrowStatus) {
       case 'Holding':
-        return 'Đang tạm giữ';
+        return 'Đang tạm giữ tại SafeMarket';
       case 'Released':
         return 'Đã giải ngân cho người bán';
       case 'Refunded':
-        return 'Đã hoàn tiền';
+        return 'Đã hoàn tiền cho người mua';
       default:
-        return 'Chưa có escrow';
+        return isOnlineEscrow ? 'Chờ thanh toán online' : 'Chưa có escrow';
     }
   }
 
   String get statusLabel {
     switch (orderStatus) {
       case 'Pending':
+        if (isOnlineEscrow) return 'Chờ thanh toán online';
         return isDirectOrder ? 'Chờ giao trực tiếp' : 'Chờ chuyển khoản';
       case 'Paid':
-        return isDirectOrder ? 'Đã giao — chờ xác nhận' : 'Đã thanh toán';
+        if (isOnlineEscrow && isDirectOrder) {
+          return 'Đã thanh toán — chờ giao hàng';
+        }
+        return isDirectOrder ? 'Đã giao — chờ xác nhận' : 'Đã thanh toán (escrow)';
       case 'Shipped':
         return 'Đang giao ship';
       case 'Completed':

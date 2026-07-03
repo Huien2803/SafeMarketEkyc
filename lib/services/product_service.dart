@@ -5,13 +5,13 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:safemarket_app/models/product.dart';
+import 'package:safemarket_app/models/product_filters.dart';
 import 'package:safemarket_app/services/api_config.dart';
 import 'package:safemarket_app/services/auth_service.dart';
 class ProductService {
   ProductService._();
   static final ProductService instance = ProductService._();
 
-  /// NestJS trả `[...]`; một số bản cũ trả `{ items: [...] }`.
   List<dynamic> _parseListResponse(String body, String label) {
     final decoded = jsonDecode(body);
     if (decoded is List<dynamic>) return decoded;
@@ -25,6 +25,24 @@ class ProductService {
       throw Exception(text);
     }
     throw Exception('Không đọc được dữ liệu $label');
+  }
+
+  String _httpErrorHint(http.Response res) {
+    try {
+      final decoded = jsonDecode(res.body);
+      if (decoded is Map<String, dynamic>) {
+        final msg = decoded['message'];
+        if (msg is List && msg.isNotEmpty) {
+          final text = msg.join(', ');
+          if (text.contains('should not exist')) {
+            return '\nBackend chưa cập nhật bộ lọc — chạy lại: cd backend && npm run start:dev';
+          }
+          return '\n$text';
+        }
+        if (msg is String && msg.isNotEmpty) return '\n$msg';
+      }
+    } catch (_) {}
+    return '';
   }
 
   Future<List<ProductCategory>> getCategories() async {
@@ -43,6 +61,7 @@ class ProductService {
     int? categoryId,
     String? search,
     bool verifiedOnly = false,
+    ProductFilters filters = ProductFilters.empty,
   }) async {
     final query = <String, String>{};
     if (categoryId != null && categoryId > 0) {
@@ -54,11 +73,24 @@ class ProductService {
     if (verifiedOnly) {
       query['verifiedOnly'] = 'true';
     }
+    if (filters.minPrice != null) {
+      query['minPrice'] = '${filters.minPrice}';
+    }
+    if (filters.maxPrice != null) {
+      query['maxPrice'] = '${filters.maxPrice}';
+    }
+    if (filters.location != null && filters.location!.isNotEmpty) {
+      query['location'] = filters.location!;
+    }
+    if (filters.sort != ProductSort.newest) {
+      query['sort'] = filters.sort.apiValue;
+    }
     final uri = Uri.parse('${ApiConfig.baseUrl}/products')
         .replace(queryParameters: query.isEmpty ? null : query);
     final res = await http.get(uri).timeout(ApiConfig.timeout);
     if (res.statusCode != 200) {
-      throw Exception('Không tải được sản phẩm (${res.statusCode})');
+      final hint = _httpErrorHint(res);
+      throw Exception('Không tải được sản phẩm (${res.statusCode})$hint');
     }
     final list = _parseListResponse(res.body, 'sản phẩm');
     return list

@@ -8,6 +8,7 @@ import { AppModule } from './app.module';
 import { ensureProductUploadDir } from './products/product-upload.config';
 import { ensureChatUploadDir } from './chat/chat-upload.config';
 import { ensureOrderUploadDir } from './orders/order-upload.config';
+import { ensureAvatarUploadDir } from './users/avatar-upload.config';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -18,6 +19,7 @@ async function bootstrap() {
   ensureProductUploadDir();
   ensureChatUploadDir();
   ensureOrderUploadDir();
+  ensureAvatarUploadDir();
   app.useStaticAssets(join(process.cwd(), 'uploads'), {
     prefix: '/uploads/',
   });

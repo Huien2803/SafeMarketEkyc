@@ -11,6 +11,7 @@ import 'package:safemarket_app/services/order_service.dart';
 import 'package:safemarket_app/services/user_service.dart';
 import 'package:safemarket_app/widgets/seller_product_tile.dart';
 import 'package:safemarket_app/widgets/star_rating.dart';
+import 'package:safemarket_app/widgets/report_violation_sheet.dart';
 import 'package:safemarket_app/widgets/verified_badge.dart';
 
 /// Hồ sơ công khai — shop sản phẩm + nút theo dõi.
@@ -108,6 +109,26 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
+          if (canFollow && AuthService.instance.isLoggedIn)
+            IconButton(
+              tooltip: 'Báo cáo vi phạm',
+              icon: const Icon(Icons.flag_outlined),
+              onPressed: () async {
+                final sent = await showReportViolationSheet(
+                  context,
+                  reportedUserId: widget.userId,
+                  targetLabel:
+                      widget.displayNameHint ?? 'User #${widget.userId}',
+                );
+                if (sent && mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Đã gửi báo cáo — admin sẽ kiểm duyệt'),
+                    ),
+                  );
+                }
+              },
+            ),
           if (canFollow)
             Padding(
               padding: const EdgeInsets.only(right: 8),
@@ -177,7 +198,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                         const Positioned(
                           right: -2,
                           bottom: -2,
-                          child: VerifiedBadge(size: 24),
+                          child: VerifiedBadge(size: 24.0),
                         ),
                     ],
                   ),

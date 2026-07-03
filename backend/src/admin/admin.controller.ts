@@ -72,6 +72,31 @@ export class AdminController {
     return this.adminService.lockUser(userId, body.reason ?? 'Vi phạm');
   }
 
+  @Post('users/:userId/ban')
+  banUser(
+    @Param('userId', ParseIntPipe) userId: number,
+    @Body() body: { reason?: string },
+  ) {
+    return this.adminService.banUser(userId, body.reason ?? 'Cấm vĩnh viễn');
+  }
+
+  @Post('users/:userId/punish')
+  punishUser(
+    @Param('userId', ParseIntPipe) userId: number,
+    @Body() body: { points: number; reason?: string },
+  ) {
+    return this.adminService.punishUser(
+      userId,
+      body.points,
+      body.reason ?? 'Vi phạm quy định',
+    );
+  }
+
+  @Post('users/:userId/delete')
+  deleteUser(@Param('userId', ParseIntPipe) userId: number) {
+    return this.adminService.deleteUser(userId);
+  }
+
   @Post('users/:userId/unlock')
   unlockUser(@Param('userId', ParseIntPipe) userId: number) {
     return this.adminService.unlockUser(userId);
@@ -83,5 +108,10 @@ export class AdminController {
     @Body() body: { status?: string },
   ) {
     return this.adminService.resolveReport(reportId, body.status ?? 'Resolved');
+  }
+
+  @Post('products/:productId/hide')
+  hideProduct(@Param('productId', ParseIntPipe) productId: number) {
+    return this.adminService.hideReportedProduct(productId);
   }
 }

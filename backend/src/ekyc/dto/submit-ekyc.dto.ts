@@ -38,13 +38,26 @@ export class SubmitEkycDto {
   address: string;
 
   @ApiProperty({
+    required: false,
     example: 0.92,
-    description: 'Điểm similarity từ face match (0..1)',
+    description: 'Điểm similarity từ face match (0..1) — luồng cũ, không bắt buộc',
   })
+  @IsOptional()
   @IsNumber()
   @Min(0)
   @Max(1)
-  faceSimilarity: number;
+  faceSimilarity?: number;
+
+  @ApiProperty({
+    required: false,
+    example: 12,
+    description:
+      'Số điểm nhận dạng khuôn mặt (facial landmarks) lấy được ở bước liveness',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  recognitionPoints?: number;
 
   @ApiProperty({ required: false, example: '/uploads/kyc/1/front.jpg' })
   @IsOptional()

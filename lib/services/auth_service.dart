@@ -6,7 +6,20 @@ import 'package:safemarket_app/models/auth_user.dart';
 import 'package:safemarket_app/services/api_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Exception riêng cho lỗi gọi API (dễ catch trong UI).
+/// Kết quả yêu cầu OTP đăng ký.
+class RegisterOtpResult {
+  const RegisterOtpResult({
+    required this.expiresInSeconds,
+    this.devOtp,
+    this.message,
+  });
+
+  final int expiresInSeconds;
+  /// Có khi backend chưa cấu hình SMTP (dev) — hiển thị cho user test.
+  final String? devOtp;
+  final String? message;
+}
+
 class AuthException implements Exception {
   AuthException(this.message, {this.statusCode});
 
@@ -53,23 +66,40 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<AuthResponse> register({
+  /// Bước 1: gửi yêu cầu đăng ký -> backend gửi OTP về email.
+  Future<RegisterOtpResult> requestRegisterOtp({
     required String phoneNumber,
     required String email,
     required String password,
-    String? displayName,
+    required String displayName,
     String? location,
   }) async {
     final body = <String, dynamic>{
       'phoneNumber': phoneNumber,
       'email': email,
       'password': password,
-      if (displayName != null && displayName.isNotEmpty)
-        'displayName': displayName,
+      'displayName': displayName,
       if (location != null && location.isNotEmpty) 'location': location,
     };
 
-    final res = await _postJson('/auth/register', body);
+    final res = await _postJson('/auth/register/request-otp', body);
+    final secs = res['expiresInSeconds'];
+    return RegisterOtpResult(
+      expiresInSeconds: secs is int ? secs : 300,
+      devOtp: res['devOtp'] as String?,
+      message: res['message'] as String?,
+    );
+  }
+
+  /// Bước 2: xác thực OTP -> tạo tài khoản và đăng nhập luôn.
+  Future<AuthResponse> verifyRegisterOtp({
+    required String email,
+    required String otp,
+  }) async {
+    final res = await _postJson('/auth/register/verify-otp', {
+      'email': email,
+      'otp': otp,
+    });
     return _finishAuth(res);
   }
 

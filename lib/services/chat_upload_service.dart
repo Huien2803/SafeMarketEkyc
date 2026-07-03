@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:safemarket_app/services/api_config.dart';
 import 'package:safemarket_app/services/auth_service.dart';
@@ -18,11 +19,18 @@ class ChatUploadService {
       ..headers['Authorization'] = 'Bearer $token';
 
     final bytes = await image.readAsBytes();
+    final name = image.name.toLowerCase();
+    final mime = name.endsWith('.png')
+        ? MediaType('image', 'png')
+        : name.endsWith('.webp')
+            ? MediaType('image', 'webp')
+            : MediaType('image', 'jpeg');
     req.files.add(
       http.MultipartFile.fromBytes(
         'image',
         bytes,
-        filename: image.name,
+        filename: image.name.isEmpty ? 'chat.jpg' : image.name,
+        contentType: mime,
       ),
     );
 

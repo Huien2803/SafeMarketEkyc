@@ -25,6 +25,7 @@ import { ChatThread } from './entities/chat-thread.entity';
 import { ChatMessage } from './entities/chat-message.entity';
 import { FollowsModule } from './follows/follows.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { PaymentsModule } from './payments/payments.module';
 import { UserFollow } from './entities/user-follow.entity';
 import { Notification } from './entities/notification.entity';
 
@@ -92,6 +93,7 @@ import { Notification } from './entities/notification.entity';
     ReportsModule,
     FollowsModule,
     NotificationsModule,
+    PaymentsModule,
   ],
 })
 export class AppModule {}

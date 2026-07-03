@@ -5,17 +5,17 @@ import 'package:image_picker/image_picker.dart';
 import 'package:safemarket_app/core/constants/app_decorations.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
 import 'package:safemarket_app/models/ekyc_models.dart';
+import 'package:safemarket_app/screens/liveness_challenge_screen.dart';
 import 'package:safemarket_app/services/auth_service.dart';
 import 'package:safemarket_app/services/ekyc_service.dart';
 
-/// Màn hình xác thực danh tính (eKYC) - 4 bước:
+/// Màn hình xác thực danh tính (eKYC) - các bước:
 ///   1. intro:        hướng dẫn chuẩn bị
 ///   2. frontIdCard:  chụp mặt trước CCCD -> FPT.AI OCR
 ///   3. backIdCard:   chụp mặt sau CCCD -> FPT.AI OCR
-///   4. liveness:     kiểm tra người thật
-///   5. selfie:       chụp selfie -> Face Match -> submit
+///   4. liveness:     xác minh khuôn mặt thật + LẤY ĐIỂM NHẬN DẠNG -> submit
 ///   -> result
-enum _EkycStep { intro, frontIdCard, backIdCard, liveness, selfie, result }
+enum _EkycStep { intro, frontIdCard, backIdCard, liveness, result }
 
 class IdentityVerificationScreen extends StatefulWidget {
   const IdentityVerificationScreen({super.key});
@@ -33,16 +33,43 @@ class _IdentityVerificationScreenState
   bool _busy = false;
   String? _errorMessage;
 
+  /// Đang kiểm tra trạng thái eKYC hiện tại khi mở màn hình.
+  bool _checkingStatus = true;
+
+  /// Trạng thái eKYC đã có sẵn (Verified/Pending) -> không cho quét lại.
+  EkycStatus? _existingStatus;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadExistingStatus();
+  }
+
+  Future<void> _loadExistingStatus() async {
+    try {
+      final status = await EkycService.instance.getMyStatus();
+      if (!mounted) return;
+      // Đã Verified hoặc đang Pending -> hiển thị bảng thông tin, ẩn luồng quét.
+      final locked = status.isVerified || status.status == 'Pending';
+      setState(() {
+        _existingStatus = locked ? status : null;
+        _checkingStatus = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _checkingStatus = false);
+    }
+  }
+
   // Dữ liệu giữa các bước
   File? _frontFile;
   File? _backFile;
-  File? _livenessFile;
-  File? _selfieFile;
+  File? _faceFile;
   IdCardFront? _frontData;
   IdCardBack? _backData;
-  FaceMatchResult? _matchResult;
   EkycStatus? _finalStatus;
   String? _livenessToken;
+  int? _recognitionPoints;
 
   @override
   Widget build(BuildContext context) {
@@ -73,13 +100,23 @@ class _IdentityVerificationScreenState
   }
 
   Widget _buildBody() {
+    if (_checkingStatus) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    // Đã xác thực / đang chờ duyệt: hiện bảng thông báo + thông tin, không quét lại.
+    if (_existingStatus != null && _step != _EkycStep.result) {
+      return _AlreadyVerifiedView(
+        status: _existingStatus!,
+        onDone: () => Navigator.of(context).pop(true),
+      );
+    }
     switch (_step) {
       case _EkycStep.intro:
         return _IntroView(onStart: () => _setStep(_EkycStep.frontIdCard));
       case _EkycStep.frontIdCard:
         return _CaptureView(
           stepIndex: 1,
-          totalSteps: 4,
+          totalSteps: 3,
           title: 'Chụp MẶT TRƯỚC CCCD',
           subtitle:
               'Đặt CCCD trong khung, đảm bảo rõ ảnh và 4 góc. Tránh lóa sáng.',
@@ -100,7 +137,7 @@ class _IdentityVerificationScreenState
       case _EkycStep.backIdCard:
         return _CaptureView(
           stepIndex: 2,
-          totalSteps: 4,
+          totalSteps: 3,
           title: 'Chụp MẶT SAU CCCD',
           subtitle: 'Đặt mặt sau (có MRZ + ngày cấp) trong khung.',
           icon: Icons.credit_card_outlined,
@@ -117,58 +154,14 @@ class _IdentityVerificationScreenState
               : () => _setStep(_EkycStep.liveness),
         );
       case _EkycStep.liveness:
-        return _CaptureView(
-          stepIndex: 3,
-          totalSteps: 4,
-          title: 'KIỂM TRA NGƯỜI THẬT',
-          subtitle:
-              'Chụp selfie để xác minh bạn là người thật (chống ảnh/video giả mạo).',
-          icon: Icons.verified_user_outlined,
-          selectedFile: _livenessFile,
+        return _LivenessStartView(
           busy: _busy,
           errorMessage: _errorMessage,
-          dataPreview: _livenessToken != null
-              ? const _LivenessPreview()
-              : null,
-          primaryLabel: _livenessToken == null ? 'Kiểm tra liveness' : 'Tiếp tục',
-          onTakePhoto: () => _pickImage(
-            ImageSource.camera,
-            _setLiveness,
-            preferFront: true,
-          ),
-          onPickGallery: () => _pickImage(ImageSource.gallery, _setLiveness),
-          onPrimary: _livenessToken == null ? _runLiveness : () => _setStep(_EkycStep.selfie),
-        );
-      case _EkycStep.selfie:
-        return _CaptureView(
-          stepIndex: 4,
-          totalSteps: 4,
-          title: 'Chụp KHUÔN MẶT',
-          subtitle:
-              'Nhìn thẳng camera, không đeo kính/khẩu trang. Hệ thống sẽ so khớp với ảnh trên CCCD.',
-          icon: Icons.face_retouching_natural,
-          selectedFile: _selfieFile,
-          busy: _busy,
-          errorMessage: _errorMessage,
-          dataPreview: _matchResult == null
-              ? null
-              : _MatchPreview(result: _matchResult!),
-          primaryLabel: _matchResult == null
-              ? 'So khớp khuôn mặt'
-              : (_matchResult!.isMatch ? 'Hoàn tất xác thực' : 'Chụp lại'),
-          onTakePhoto: () =>
-              _pickImage(ImageSource.camera, _setSelfie, preferFront: true),
-          onPickGallery: () => _pickImage(ImageSource.gallery, _setSelfie),
-          onPrimary: _matchResult == null
-              ? _runFaceMatch
-              : (_matchResult!.isMatch
-                  ? _submit
-                  : () {
-                      setState(() {
-                        _selfieFile = null;
-                        _matchResult = null;
-                      });
-                    }),
+          passed: _recognitionPoints != null,
+          pointCount: _recognitionPoints,
+          faceFile: _faceFile,
+          onStart: _startLiveness,
+          onContinue: _submit,
         );
       case _EkycStep.result:
         return _ResultView(
@@ -197,9 +190,6 @@ class _IdentityVerificationScreenState
         break;
       case _EkycStep.liveness:
         _setStep(_EkycStep.backIdCard);
-        break;
-      case _EkycStep.selfie:
-        _setStep(_EkycStep.liveness);
         break;
       case _EkycStep.intro:
       case _EkycStep.result:
@@ -242,18 +232,6 @@ class _IdentityVerificationScreenState
         _errorMessage = null;
       });
 
-  void _setLiveness(File f) => setState(() {
-        _livenessFile = f;
-        _livenessToken = null;
-        _errorMessage = null;
-      });
-
-  void _setSelfie(File f) => setState(() {
-        _selfieFile = f;
-        _matchResult = null;
-        _errorMessage = null;
-      });
-
   // ------------------- API calls -------------------
 
   Future<void> _scanFront() async {
@@ -276,42 +254,29 @@ class _IdentityVerificationScreenState
     });
   }
 
-  Future<void> _runLiveness() async {
-    if (_livenessFile == null) {
-      _showError('Chụp selfie để kiểm tra liveness');
-      return;
-    }
-    await _runApi(() async {
-      final result = await EkycService.instance.livenessCheck(_livenessFile!);
-      final passed = result['passed'] == true;
-      if (!passed) {
-        _errorMessage = 'Liveness chưa đạt. Hãy chụp lại với khuôn mặt thật.';
-        return;
-      }
-      _livenessToken = result['livenessToken'] as String? ?? 'live-ok';
-    });
-  }
-
-  Future<void> _runFaceMatch() async {
-    if (_selfieFile == null || _frontFile == null) {
-      _showError('Thiếu ảnh CCCD hoặc selfie');
-      return;
-    }
-    await _runApi(() async {
-      _matchResult = await EkycService.instance.faceMatch(
-        idCard: _frontFile!,
-        selfie: _selfieFile!,
-      );
-      if (!_matchResult!.isMatch) {
-        _errorMessage =
-            'Khuôn mặt chưa khớp (similarity ${(_matchResult!.similarity * 100).toStringAsFixed(1)}%). Hãy chụp lại.';
-      }
+  /// Mở màn xác minh khuôn mặt động (Face ID xoay mặt). Khi đạt, hệ thống
+  /// đã LẤY ĐIỂM NHẬN DẠNG khuôn mặt (facial landmarks) thay cho việc so khớp
+  /// với ảnh trên CCCD.
+  Future<void> _startLiveness() async {
+    setState(() => _errorMessage = null);
+    final result = await Navigator.of(context).push<LivenessResult>(
+      MaterialPageRoute(builder: (_) => const LivenessChallengeScreen()),
+    );
+    if (!mounted || result == null) return;
+    setState(() {
+      _faceFile = result.selfieFile;
+      _livenessToken = result.token;
+      _recognitionPoints = result.pointCount;
+      _errorMessage = null;
+      _step = _EkycStep.liveness;
     });
   }
 
   Future<void> _submit() async {
-    if (_frontData == null || _matchResult == null || _livenessToken == null) {
-      _showError('Thiếu dữ liệu để submit eKYC (cần hoàn tất liveness)');
+    if (_frontData == null ||
+        _livenessToken == null ||
+        _recognitionPoints == null) {
+      _showError('Thiếu dữ liệu để submit eKYC (cần hoàn tất xác minh khuôn mặt)');
       return;
     }
     await _runApi(() async {
@@ -322,7 +287,7 @@ class _IdentityVerificationScreenState
         address: _frontData!.address.isNotEmpty
             ? _frontData!.address
             : _frontData!.home,
-        faceSimilarity: _matchResult!.similarity,
+        recognitionPoints: _recognitionPoints!,
         livenessToken: _livenessToken!,
       );
       _step = _EkycStep.result;
@@ -666,75 +631,201 @@ class _BackDataPreview extends StatelessWidget {
   }
 }
 
-class _LivenessPreview extends StatelessWidget {
-  const _LivenessPreview();
+class _LivenessStartView extends StatelessWidget {
+  const _LivenessStartView({
+    required this.busy,
+    required this.errorMessage,
+    required this.passed,
+    required this.pointCount,
+    required this.faceFile,
+    required this.onStart,
+    required this.onContinue,
+  });
+
+  final bool busy;
+  final String? errorMessage;
+  final bool passed;
+  final int? pointCount;
+  final File? faceFile;
+  final VoidCallback onStart;
+  final VoidCallback onContinue;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: AppDecorations.card(),
-      child: const Row(
-        children: [
-          Icon(Icons.verified_user, color: AppColors.trustGreen, size: 20),
-          SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'Liveness đạt — xác thực người thật thành công',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                color: AppColors.trustGreen,
-              ),
+    return Column(
+      children: [
+        const _StepProgress(current: 3, total: 3),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 12),
+                const Text(
+                  'XÁC MINH KHUÔN MẶT & LẤY ĐIỂM NHẬN DẠNG',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Hệ thống sẽ yêu cầu bạn nhìn thẳng rồi quay đầu theo hướng dẫn '
+                  '(giống Face ID) để lấy các điểm nhận dạng trên khuôn mặt. '
+                  'Ảnh tĩnh hoặc đồ vật sẽ không thể vượt qua.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.5,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                AspectRatio(
+                  aspectRatio: 16 / 11,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE3EDFF),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: (passed && faceFile != null)
+                        ? Image.file(faceFile!, fit: BoxFit.cover)
+                        : Icon(
+                            passed
+                                ? Icons.verified
+                                : Icons.face_retouching_natural,
+                            color: passed
+                                ? AppColors.trustGreen
+                                : AppColors.primary,
+                            size: 72,
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const _LivenessStepHint(
+                  index: 1,
+                  text: 'Nhìn thẳng vào camera, mở mắt',
+                ),
+                const _LivenessStepHint(
+                  index: 2,
+                  text: 'Quay đầu sang TRÁI',
+                ),
+                const _LivenessStepHint(
+                  index: 3,
+                  text: 'Quay đầu sang PHẢI',
+                ),
+                if (passed) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: AppDecorations.card(),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.fingerprint,
+                            color: AppColors.trustGreen, size: 28),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Đã lấy điểm nhận dạng khuôn mặt',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.trustGreen,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Thu được ${pointCount ?? 0} điểm nhận dạng',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                if (errorMessage != null) ...[
+                  const SizedBox(height: 16),
+                  _ErrorBox(message: errorMessage!),
+                ],
+                const SizedBox(height: 24),
+              ],
             ),
           ),
-        ],
-      ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: busy ? null : (passed ? onContinue : onStart),
+              child: busy
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        valueColor:
+                            AlwaysStoppedAnimation<Color>(AppColors.white),
+                      ),
+                    )
+                  : Text(passed
+                      ? 'Hoàn tất xác thực'
+                      : 'Bắt đầu xác minh khuôn mặt'),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
 
-class _MatchPreview extends StatelessWidget {
-  const _MatchPreview({required this.result});
-  final FaceMatchResult result;
+class _LivenessStepHint extends StatelessWidget {
+  const _LivenessStepHint({required this.index, required this.text});
+  final int index;
+  final String text;
 
   @override
   Widget build(BuildContext context) {
-    final ok = result.isMatch;
-    final color = ok ? AppColors.trustGreen : AppColors.danger;
-    final pct = (result.similarity * 100).toStringAsFixed(1);
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: AppDecorations.card(),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
-          Icon(
-            ok ? Icons.verified : Icons.error_outline,
-            color: color,
-            size: 36,
+          Container(
+            width: 26,
+            height: 26,
+            alignment: Alignment.center,
+            decoration: const BoxDecoration(
+              color: AppColors.primary,
+              shape: BoxShape.circle,
+            ),
+            child: Text(
+              '$index',
+              style: const TextStyle(
+                color: AppColors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 12),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  ok ? 'Khuôn mặt khớp' : 'Khuôn mặt KHÔNG khớp',
-                  style: TextStyle(
-                    color: color,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Độ giống nhau: $pct%',
-                  style: const TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 13,
-                  ),
-                ),
-              ],
+            child: Text(
+              text,
+              style: const TextStyle(
+                fontSize: 14,
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],
@@ -889,6 +980,148 @@ class _ResultView extends StatelessWidget {
   }
 }
 
+/// Bảng thông báo khi tài khoản ĐÃ xác thực (hoặc đang chờ duyệt) —
+/// thay cho luồng quét, không cho xác thực lại.
+class _AlreadyVerifiedView extends StatelessWidget {
+  const _AlreadyVerifiedView({required this.status, required this.onDone});
+  final EkycStatus status;
+  final VoidCallback onDone;
+
+  @override
+  Widget build(BuildContext context) {
+    final verified = status.isVerified;
+    final pending = status.status == 'Pending';
+
+    final Color accent =
+        verified ? AppColors.trustGreen : AppColors.warningIcon;
+    final IconData icon =
+        verified ? Icons.verified_user : Icons.hourglass_top_rounded;
+    final String title =
+        verified ? 'Tài khoản đã được xác thực' : 'Hồ sơ đang chờ duyệt';
+    final String subtitle = verified
+        ? 'Bạn đã hoàn tất xác thực danh tính (eKYC). Không cần xác thực lại.'
+        : 'Hồ sơ eKYC của bạn đã được gửi và đang chờ quản trị viên duyệt.';
+
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 24),
+                // Banner thông báo
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: verified
+                        ? AppColors.ekycVerifiedBg
+                        : AppColors.warningBg,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 52,
+                        height: 52,
+                        decoration: BoxDecoration(
+                          color: accent.withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(icon, color: accent, size: 30),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: accent,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              subtitle,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                height: 1.4,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Thông tin xác thực',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: AppDecorations.card(),
+                  child: Column(
+                    children: [
+                      _KvRow(label: 'Họ tên', value: status.fullName ?? '—'),
+                      _KvRow(label: 'Số CCCD', value: status.idNumber ?? '—'),
+                      _KvRow(label: 'Ngày sinh', value: status.dob ?? '—'),
+                      _KvRow(label: 'Địa chỉ', value: status.address ?? '—'),
+                      _KvRow(
+                        label: 'Trạng thái',
+                        value: verified
+                            ? 'Đã xác thực'
+                            : (pending ? 'Chờ duyệt' : status.status),
+                      ),
+                      if (status.submittedAt != null)
+                        _KvRow(
+                          label: 'Ngày gửi',
+                          value: _fmtDate(status.submittedAt!),
+                        ),
+                      if (status.verifiedAt != null)
+                        _KvRow(
+                          label: 'Ngày duyệt',
+                          value: _fmtDate(status.verifiedAt!),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+              ],
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: onDone,
+              child: const Text('Đóng'),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _fmtDate(DateTime d) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(d.day)}/${two(d.month)}/${d.year}';
+  }
+}
+
 // ====================================================================
 //                       Widgets giữ nguyên từ bản cũ
 // ====================================================================
@@ -1006,7 +1239,7 @@ class _SecurityNoticeBox extends StatelessWidget {
           SizedBox(width: 12),
           Expanded(
             child: Text(
-              'Hệ thống dùng AI FPT.AI để OCR CCCD và so khớp khuôn mặt. '
+              'Hệ thống dùng AI FPT.AI để OCR CCCD và lấy điểm nhận dạng khuôn mặt. '
               'Thông tin được mã hóa, chỉ dùng để xác thực danh tính.',
               style: TextStyle(
                 fontSize: 13,

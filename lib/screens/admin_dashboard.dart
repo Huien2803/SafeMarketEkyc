@@ -289,6 +289,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           loading: _loading,
           onLock: _lockUser,
           onUnlock: _unlockUser,
+          onBan: _banUser,
+          onPunish: _punishUser,
+          onDelete: _deleteUser,
         );
       case 2:
         return _RankingCard(
@@ -309,6 +312,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           reports: _reports,
           loading: _loading,
           onResolve: _resolveReport,
+          onHideProduct: _hideReportedProduct,
+          onLockUser: _lockUserById,
+          onPunishUser: _punishUserById,
         );
       case 5:
         return _LockedUsersCard(
@@ -349,7 +355,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               },
             ),
             const SizedBox(height: 24),
-            _UsersTableCard(users: _filteredUsers, loading: _loading),
+            _UsersTableCard(
+              users: _filteredUsers,
+              loading: _loading,
+              onLock: _lockUser,
+              onUnlock: _unlockUser,
+              onBan: _banUser,
+              onPunish: _punishUser,
+              onDelete: _deleteUser,
+            ),
           ],
         );
     }
@@ -377,10 +391,162 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
-  Future<void> _lockUser(int userId) async {
+  Future<String?> _promptText({
+    required String title,
+    required String hint,
+    String initial = '',
+  }) async {
+    final ctrl = TextEditingController(text: initial);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: ctrl,
+          decoration: InputDecoration(hintText: hint),
+          maxLines: 2,
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Huỷ'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Xác nhận'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    return result;
+  }
+
+  Future<void> _lockUser(AdminUserRow user) async {
+    final reason = await _promptText(
+      title: 'Khóa tài khoản',
+      hint: 'Lý do khóa...',
+      initial: 'Vi phạm quy định',
+    );
+    if (reason == null || reason.isEmpty || !mounted) return;
     try {
-      await AdminService.instance.lockUser(userId);
+      await AdminService.instance.lockUser(user.userId, reason: reason);
       await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Đã khóa ${user.displayName ?? user.email}')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
+  Future<void> _banUser(AdminUserRow user) async {
+    final reason = await _promptText(
+      title: 'Cấm vĩnh viễn',
+      hint: 'Lý do cấm...',
+      initial: 'Cấm vĩnh viễn',
+    );
+    if (reason == null || reason.isEmpty || !mounted) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Xác nhận cấm'),
+        content: Text(
+          'Cấm vĩnh viễn ${user.displayName ?? user.email}?\nLý do: $reason',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Huỷ')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            child: const Text('Cấm'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await AdminService.instance.banUser(user.userId, reason: reason);
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
+  Future<void> _punishUser(AdminUserRow user) async {
+    final pointsStr = await _promptText(
+      title: 'Trừ điểm tín nhiệm',
+      hint: 'Số điểm trừ (1–500)...',
+      initial: '50',
+    );
+    if (pointsStr == null || !mounted) return;
+    final points = int.tryParse(pointsStr);
+    if (points == null || points < 1 || points > 500) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Số điểm trừ phải từ 1 đến 500')),
+      );
+      return;
+    }
+    final reason = await _promptText(
+      title: 'Lý do trừ điểm',
+      hint: 'Mô tả vi phạm...',
+      initial: 'Vi phạm quy định',
+    );
+    if (reason == null || reason.isEmpty || !mounted) return;
+    try {
+      await AdminService.instance.punishUser(
+        user.userId,
+        points: points,
+        reason: reason,
+      );
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Đã trừ $points điểm — ${user.displayName ?? user.email}')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
+  Future<void> _deleteUser(AdminUserRow user) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Xóa tài khoản'),
+        content: Text(
+          'Xóa vĩnh viễn ${user.displayName ?? user.email}?\n'
+          'Chỉ xóa được khi user chưa có sản phẩm/đơn hàng.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Huỷ')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            child: const Text('Xóa'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await AdminService.instance.deleteUser(user.userId);
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Đã xóa tài khoản')),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
@@ -408,6 +574,62 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
       }
     }
+  }
+
+  Future<void> _hideReportedProduct(int productId) async {
+    try {
+      await AdminService.instance.hideProduct(productId);
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Đã ẩn sản phẩm vi phạm')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
+  Future<void> _lockUserById(int userId, String name) async {
+    final reason = await _promptText(
+      title: 'Khóa người bị báo cáo',
+      hint: 'Lý do khóa...',
+      initial: 'Vi phạm quy định — báo cáo từ cộng đồng',
+    );
+    if (reason == null || reason.isEmpty || !mounted) return;
+    try {
+      await AdminService.instance.lockUser(userId, reason: reason);
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Đã khóa $name')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
+  Future<void> _punishUserById(int userId, String name) async {
+    AdminUserRow user;
+    try {
+      user = _users.firstWhere((u) => u.userId == userId);
+    } catch (_) {
+      user = AdminUserRow(
+        userId: userId,
+        email: name,
+        displayName: name,
+        kycStatus: 'Unverified',
+        accountStatus: 'Active',
+        trustScore: 500,
+        rankLevel: 'Bronze',
+      );
+    }
+    await _punishUser(user);
   }
 }
 
@@ -558,28 +780,39 @@ class _AdminHeader extends StatelessWidget {
         ? adminName.trim().substring(0, 1).toUpperCase()
         : 'A';
 
+    // showMenuButton == true nghĩa là màn hình hẹp (mobile). Khi đó ẩn bớt
+    // các thành phần phụ (tên admin, chuông thông báo) để tránh tràn ngang.
+    final narrow = showMenuButton;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      padding: EdgeInsets.symmetric(
+        horizontal: narrow ? 8 : 24,
+        vertical: 12,
+      ),
       color: AppColors.white,
       child: Row(
         children: [
-          IconButton(
-            icon: const Icon(Icons.arrow_back),
-            tooltip: 'Về SafeMarket',
-            onPressed: onBackToApp,
-          ),
-          if (showMenuButton)
+          if (narrow)
             Builder(
               builder: (ctx) => IconButton(
                 icon: const Icon(Icons.menu),
+                tooltip: 'Menu',
                 onPressed: () => Scaffold.of(ctx).openDrawer(),
               ),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.arrow_back),
+              tooltip: 'Về SafeMarket',
+              onPressed: onBackToApp,
             ),
           Expanded(
             child: TextField(
               onChanged: onSearchChanged,
               decoration: InputDecoration(
-                hintText: 'Tìm kiếm người dùng theo tên hoặc email...',
+                hintText: narrow
+                    ? 'Tìm người dùng...'
+                    : 'Tìm kiếm người dùng theo tên hoặc email...',
                 prefixIcon: Icon(Icons.search, color: AppColors.textMuted),
                 suffixIcon: searchQuery.isNotEmpty
                     ? IconButton(
@@ -602,36 +835,40 @@ class _AdminHeader extends StatelessWidget {
             tooltip: 'Làm mới',
             onPressed: onRefresh,
           ),
-          const SizedBox(width: 8),
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined),
-            onPressed: () {},
-          ),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                adminName,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary,
+          if (!narrow) ...[
+            const SizedBox(width: 8),
+            IconButton(
+              icon: const Icon(Icons.notifications_outlined),
+              onPressed: () {},
+            ),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  adminName,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
                 ),
-              ),
-              Text(
-                'HỆ THỐNG SAFEMARKET',
-                style: TextStyle(
-                  fontSize: 10,
-                  color: AppColors.textMuted,
-                  letterSpacing: 0.5,
+                Text(
+                  'HỆ THỐNG SAFEMARKET',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: AppColors.textMuted,
+                    letterSpacing: 0.5,
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(width: 12),
+              ],
+            ),
+            const SizedBox(width: 12),
+          ] else
+            const SizedBox(width: 4),
           CircleAvatar(
+            radius: 18,
             backgroundColor: const Color(0xFFBFDBFE),
             child: Text(
               initials,
@@ -679,47 +916,74 @@ class _PageTitleRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    final titleBlock = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                _title,
-                style: TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Chào mừng trở lại, đây là những gì đang diễn ra hôm nay.',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ],
+        Text(
+          _title,
+          style: const TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
+            color: AppColors.textPrimary,
           ),
         ),
-        ElevatedButton.icon(
-          onPressed: onExport,
-          icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
-          label: const Text('Xuất PDF'),
-          style: ElevatedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        const SizedBox(height: 6),
+        Text(
+          'Chào mừng trở lại, đây là những gì đang diễn ra hôm nay.',
+          style: TextStyle(
+            fontSize: 14,
+            color: AppColors.textSecondary,
           ),
-        ),
-        const SizedBox(width: 8),
-        IconButton(
-          onPressed: onRefresh,
-          icon: const Icon(Icons.refresh),
-          tooltip: 'Làm mới dữ liệu',
         ),
       ],
+    );
+
+    final exportBtn = ElevatedButton.icon(
+      onPressed: onExport,
+      icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+      label: const Text('Xuất PDF'),
+      style: ElevatedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      ),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Mobile hẹp: xếp tiêu đề trên, nút Xuất PDF + làm mới ở dưới.
+        if (constraints.maxWidth < 520) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              titleBlock,
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(child: exportBtn),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: onRefresh,
+                    icon: const Icon(Icons.refresh),
+                    tooltip: 'Làm mới dữ liệu',
+                  ),
+                ],
+              ),
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: titleBlock),
+            exportBtn,
+            const SizedBox(width: 8),
+            IconButton(
+              onPressed: onRefresh,
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Làm mới dữ liệu',
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -809,7 +1073,8 @@ class _StatsCardsRow extends StatelessWidget {
             crossAxisCount: crossAxisCount,
             mainAxisSpacing: 16,
             crossAxisSpacing: 16,
-            childAspectRatio: crossAxisCount == 1 ? 2.8 : 1.8,
+            // Chiều cao cố định để nội dung không bị tràn đáy trên mọi bề rộng.
+            mainAxisExtent: 150,
           ),
           itemCount: cards.length,
           itemBuilder: (context, index) => _StatCard(data: cards[index]),
@@ -1133,12 +1398,18 @@ class _UsersTableCard extends StatelessWidget {
     this.loading = false,
     this.onLock,
     this.onUnlock,
+    this.onBan,
+    this.onPunish,
+    this.onDelete,
   });
 
   final List<AdminUserRow> users;
   final bool loading;
-  final void Function(int userId)? onLock;
+  final void Function(AdminUserRow user)? onLock;
   final void Function(int userId)? onUnlock;
+  final void Function(AdminUserRow user)? onBan;
+  final void Function(AdminUserRow user)? onPunish;
+  final void Function(AdminUserRow user)? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -1152,13 +1423,16 @@ class _UsersTableCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'Quản lý người dùng gần đây',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
+              const Expanded(
+                child: Text(
+                  'Quản lý người dùng gần đây',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
               TextButton(onPressed: () {}, child: const Text('Xem tất cả')),
@@ -1176,6 +1450,7 @@ class _UsersTableCard extends StatelessWidget {
               ),
               columns: const [
                 DataColumn(label: Text('NGƯỜI DÙNG')),
+                DataColumn(label: Text('TRẠNG THÁI')),
                 DataColumn(label: Text('TRẠNG THÁI EKYC')),
                 DataColumn(label: Text('ĐIỂM TÍN NHIỆM')),
                 DataColumn(label: Text('GIAO DỊCH')),
@@ -1186,6 +1461,7 @@ class _UsersTableCard extends StatelessWidget {
                     (u) => DataRow(
                       cells: [
                         DataCell(_UserCellApi(user: u)),
+                        DataCell(_AccountStatusBadge(status: u.accountStatus)),
                         DataCell(_EkycBadge(
                             verified: u.kycStatus == 'Verified')),
                         DataCell(
@@ -1196,21 +1472,14 @@ class _UsersTableCard extends StatelessWidget {
                         ),
                         DataCell(Text('${u.orders}')),
                         DataCell(
-                          u.accountStatus == 'Active'
-                              ? IconButton(
-                                  tooltip: 'Khóa tài khoản',
-                                  icon: const Icon(Icons.block, size: 20),
-                                  onPressed: onLock != null
-                                      ? () => onLock!(u.userId)
-                                      : null,
-                                )
-                              : IconButton(
-                                  tooltip: 'Mở khóa',
-                                  icon: const Icon(Icons.lock_open, size: 20),
-                                  onPressed: onUnlock != null
-                                      ? () => onUnlock!(u.userId)
-                                      : null,
-                                ),
+                          _UserActionsMenu(
+                            user: u,
+                            onLock: onLock,
+                            onUnlock: onUnlock,
+                            onBan: onBan,
+                            onPunish: onPunish,
+                            onDelete: onDelete,
+                          ),
                         ),
                       ],
                     ),
@@ -1220,65 +1489,6 @@ class _UsersTableCard extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _UserRowData {
-  const _UserRowData(
-    this.name,
-    this.email,
-    this.initials,
-    this.ekycVerified,
-    this.trustScore,
-    this.orders,
-  );
-
-  final String name;
-  final String email;
-  final String initials;
-  final bool ekycVerified;
-  final int trustScore;
-  final int orders;
-}
-
-class _UserCell extends StatelessWidget {
-  const _UserCell({required this.user});
-
-  final _UserRowData user;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        CircleAvatar(
-          backgroundColor: const Color(0xFFBFDBFE),
-          radius: 18,
-          child: Text(
-            user.initials,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              color: AppColors.primary,
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              user.name,
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-            ),
-            Text(
-              user.email,
-              style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
-            ),
-          ],
-        ),
-      ],
     );
   }
 }
@@ -1319,6 +1529,131 @@ class _UserCellApi extends StatelessWidget {
                     fontSize: 11, color: AppColors.textMuted)),
           ],
         ),
+      ],
+    );
+  }
+}
+
+class _AccountStatusBadge extends StatelessWidget {
+  const _AccountStatusBadge({required this.status});
+
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    final isActive = status == 'Active';
+    final isBanned = status == 'Banned';
+    final color = isActive
+        ? AppColors.trustGreen
+        : isBanned
+            ? AppColors.danger
+            : AppColors.warning;
+    final label = isActive
+        ? 'HOẠT ĐỘNG'
+        : isBanned
+            ? 'BỊ CẤM'
+            : 'BỊ KHÓA';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
+      ),
+    );
+  }
+}
+
+class _UserActionsMenu extends StatelessWidget {
+  const _UserActionsMenu({
+    required this.user,
+    this.onLock,
+    this.onUnlock,
+    this.onBan,
+    this.onPunish,
+    this.onDelete,
+  });
+
+  final AdminUserRow user;
+  final void Function(AdminUserRow user)? onLock;
+  final void Function(int userId)? onUnlock;
+  final void Function(AdminUserRow user)? onBan;
+  final void Function(AdminUserRow user)? onPunish;
+  final void Function(AdminUserRow user)? onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final isActive = user.accountStatus == 'Active';
+    return PopupMenuButton<String>(
+      tooltip: 'Quản lý người dùng',
+      icon: const Icon(Icons.more_vert, size: 20),
+      onSelected: (action) {
+        switch (action) {
+          case 'lock':
+            onLock?.call(user);
+          case 'unlock':
+            onUnlock?.call(user.userId);
+          case 'ban':
+            onBan?.call(user);
+          case 'punish':
+            onPunish?.call(user);
+          case 'delete':
+            onDelete?.call(user);
+        }
+      },
+      itemBuilder: (ctx) => [
+        if (isActive && onLock != null)
+          const PopupMenuItem(
+            value: 'lock',
+            child: ListTile(
+              leading: Icon(Icons.block, size: 20),
+              title: Text('Khóa tài khoản'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        if (!isActive && onUnlock != null)
+          const PopupMenuItem(
+            value: 'unlock',
+            child: ListTile(
+              leading: Icon(Icons.lock_open, size: 20),
+              title: Text('Mở khóa'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        if (onBan != null)
+          const PopupMenuItem(
+            value: 'ban',
+            child: ListTile(
+              leading: Icon(Icons.gavel, size: 20, color: AppColors.danger),
+              title: Text('Cấm vĩnh viễn'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        if (onPunish != null)
+          const PopupMenuItem(
+            value: 'punish',
+            child: ListTile(
+              leading: Icon(Icons.remove_circle_outline, size: 20),
+              title: Text('Trừ điểm tín nhiệm'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        if (onDelete != null)
+          const PopupMenuItem(
+            value: 'delete',
+            child: ListTile(
+              leading: Icon(Icons.delete_outline, size: 20, color: AppColors.danger),
+              title: Text('Xóa tài khoản'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
       ],
     );
   }
@@ -1419,11 +1754,17 @@ class _ReportsManageCard extends StatelessWidget {
     required this.reports,
     required this.loading,
     required this.onResolve,
+    this.onHideProduct,
+    this.onLockUser,
+    this.onPunishUser,
   });
 
   final List<Map<String, dynamic>> reports;
   final bool loading;
   final void Function(int reportId) onResolve;
+  final void Function(int productId)? onHideProduct;
+  final void Function(int userId, String name)? onLockUser;
+  final void Function(int userId, String name)? onPunishUser;
 
   @override
   Widget build(BuildContext context) {
@@ -1436,20 +1777,147 @@ class _ReportsManageCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Xử lý báo cáo vi phạm',
+          const Text('Kiểm duyệt báo cáo vi phạm',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          Text(
+            'Báo cáo sản phẩm hoặc người dùng có ý đồ xấu từ cộng đồng.',
+            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+          ),
           const SizedBox(height: 16),
           if (reports.isEmpty)
             const Text('Không có báo cáo mở')
           else
             ...reports.map((r) {
               final id = (r['reportId'] as num).toInt();
-              return ListTile(
-                title: Text(r['name'] as String? ?? ''),
-                subtitle: Text(r['reason'] as String? ?? ''),
-                trailing: FilledButton(
-                  onPressed: () => onResolve(id),
-                  child: const Text('Đã xử lý'),
+              final reportedUserId = (r['reportedUserId'] as num?)?.toInt();
+              final productId = (r['productId'] as num?)?.toInt();
+              final productTitle = r['productTitle'] as String?;
+              final reportType = r['reportType'] as String? ?? 'user';
+              final severity = r['severity'] as String? ?? 'medium';
+              final name = r['name'] as String? ?? 'User';
+              final reporterName = r['reporterName'] as String? ?? '';
+              final isProduct = reportType == 'product' && productId != null;
+
+              return Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isProduct
+                                  ? AppColors.warning.withValues(alpha: 0.15)
+                                  : AppColors.primary.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              isProduct ? 'SẢN PHẨM' : 'NGƯỜI DÙNG',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                color: isProduct
+                                    ? AppColors.warning
+                                    : AppColors.primary,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: severity == 'high'
+                                  ? AppColors.danger.withValues(alpha: 0.12)
+                                  : AppColors.textMuted.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              severity.toUpperCase(),
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: severity == 'high'
+                                    ? AppColors.danger
+                                    : AppColors.textMuted,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                        ),
+                      ),
+                      if (isProduct && productTitle != null)
+                        Text(
+                          'SP: $productTitle',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      if (reporterName.isNotEmpty)
+                        Text(
+                          'Báo cáo bởi: $reporterName',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppColors.textMuted,
+                          ),
+                        ),
+                      const SizedBox(height: 6),
+                      Text(
+                        r['reason'] as String? ?? '',
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          if (isProduct && onHideProduct != null)
+                            OutlinedButton.icon(
+                              onPressed: () => onHideProduct!(productId!),
+                              icon: const Icon(Icons.visibility_off, size: 16),
+                              label: const Text('Ẩn SP'),
+                            ),
+                          if (reportedUserId != null && onLockUser != null)
+                            OutlinedButton.icon(
+                              onPressed: () =>
+                                  onLockUser!(reportedUserId, name),
+                              icon: const Icon(Icons.block, size: 16),
+                              label: const Text('Khóa user'),
+                            ),
+                          if (reportedUserId != null && onPunishUser != null)
+                            OutlinedButton.icon(
+                              onPressed: () =>
+                                  onPunishUser!(reportedUserId, name),
+                              icon: const Icon(Icons.remove_circle_outline,
+                                  size: 16),
+                              label: const Text('Trừ điểm'),
+                            ),
+                          FilledButton(
+                            onPressed: () => onResolve(id),
+                            child: const Text('Đã xử lý'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               );
             }),
@@ -1531,15 +1999,13 @@ class _RankingCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Xếp hạng điểm tín nhiệm',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                ),
-              ),
-              SegmentedButton<bool>(
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const title = Text(
+                'Xếp hạng điểm tín nhiệm',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              );
+              final segmented = SegmentedButton<bool>(
                 segments: const [
                   ButtonSegment(
                     value: true,
@@ -1553,17 +2019,35 @@ class _RankingCard extends StatelessWidget {
                   ),
                 ],
                 selected: {descending},
-                onSelectionChanged: loading
-                    ? null
-                    : (s) => onOrderChanged(s.first),
-                style: ButtonStyle(
+                onSelectionChanged:
+                    loading ? null : (s) => onOrderChanged(s.first),
+                style: const ButtonStyle(
                   visualDensity: VisualDensity.compact,
-                  textStyle: WidgetStatePropertyAll(
-                    const TextStyle(fontSize: 12),
-                  ),
+                  textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 12)),
                 ),
-              ),
-            ],
+              );
+
+              // Màn hình hẹp: tiêu đề ở trên, bộ lọc thứ tự ở dưới.
+              if (constraints.maxWidth < 480) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    title,
+                    const SizedBox(height: 10),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: segmented,
+                    ),
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  const Expanded(child: title),
+                  segmented,
+                ],
+              );
+            },
           ),
           const SizedBox(height: 6),
           Text(
@@ -1650,68 +2134,66 @@ class _RankingRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = row.displayName ?? row.email;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 32,
-            child: Text(
-              '#${row.rank}',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w800,
-                color: _rankColor(),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Màn hình hẹp: ẩn thanh điểm bên phải (điểm số đã hiển thị bằng chữ)
+        // để tránh tràn ngang.
+        final showBar = constraints.maxWidth >= 420;
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 32,
+                child: Text(
+                  '#${row.rank}',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: _rankColor(),
+                  ),
+                ),
               ),
-            ),
-          ),
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: const Color(0xFFBFDBFE),
-            child: Text(
-              name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?',
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                color: AppColors.primary,
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: const Color(0xFFBFDBFE),
+                child: Text(
+                  name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primary,
+                  ),
+                ),
               ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Flexible(
-                      child: Text(
-                        name,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
                         ),
-                      ),
+                        const SizedBox(width: 8),
+                        _EkycBadge(verified: row.verified),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    _EkycBadge(verified: row.verified),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
+                    const SizedBox(height: 4),
                     Text(
-                      '${row.trustScore} điểm · ${row.rankLevel}',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '${row.orders} giao dịch',
+                      '${row.trustScore} điểm · ${row.rankLevel} · ${row.orders} giao dịch',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 11,
                         color: AppColors.textMuted,
@@ -1719,13 +2201,15 @@ class _RankingRow extends StatelessWidget {
                     ),
                   ],
                 ),
+              ),
+              if (showBar) ...[
+                const SizedBox(width: 12),
+                SizedBox(width: 120, child: TrustScoreBar(score: row.trustScore)),
               ],
-            ),
+            ],
           ),
-          const SizedBox(width: 12),
-          SizedBox(width: 120, child: TrustScoreBar(score: row.trustScore)),
-        ],
-      ),
+        );
+      },
     );
   }
 }

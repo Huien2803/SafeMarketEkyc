@@ -51,7 +51,7 @@ class EkycService {
     required String fullName,
     required String dob,
     required String address,
-    required double faceSimilarity,
+    required int recognitionPoints,
     required String livenessToken,
   }) async {
     final token = _requireToken();
@@ -68,7 +68,7 @@ class EkycService {
             'fullName': fullName,
             'dob': dob,
             'address': address,
-            'faceSimilarity': faceSimilarity,
+            'recognitionPoints': recognitionPoints,
             'livenessToken': livenessToken,
           }),
         )

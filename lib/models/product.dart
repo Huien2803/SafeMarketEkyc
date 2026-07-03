@@ -13,6 +13,7 @@ class ProductListItem {
     required this.sellerVerified,
     required this.categoryName,
     required this.categoryId,
+    this.sellerId,
     this.thumbnailUrl,
   });
 
@@ -27,6 +28,7 @@ class ProductListItem {
   final bool sellerVerified;
   final String categoryName;
   final int categoryId;
+  final int? sellerId;
   final String? thumbnailUrl;
 
   factory ProductListItem.fromJson(Map<String, dynamic> json) {
@@ -43,6 +45,8 @@ class ProductListItem {
         (seller?['trustScore'] as num?)?.toInt() ??
         500;
     final kyc = seller?['kycStatus'] as String?;
+    final sellerId = (json['sellerId'] as num?)?.toInt() ??
+        (seller?['userId'] as num?)?.toInt();
     return ProductListItem(
       id: id,
       title: json['title'] as String,
@@ -57,6 +61,7 @@ class ProductListItem {
           (kyc == 'Verified'),
       categoryName: json['categoryName'] as String? ?? '',
       categoryId: (json['categoryId'] as num?)?.toInt() ?? 0,
+      sellerId: sellerId,
       thumbnailUrl: json['thumbnailUrl'] as String?,
     );
   }

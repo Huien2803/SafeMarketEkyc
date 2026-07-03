@@ -368,10 +368,46 @@ class AdminService {
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
 
-      throw Exception('Không khóa được tài khoản');
+      throw Exception(_errorFromResponse(res, 'Không khóa được tài khoản'));
 
     }
 
+  }
+
+  Future<void> banUser(int userId, {String reason = 'Cấm vĩnh viễn'}) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/ban');
+    final res = await http
+        .post(uri, headers: _headers, body: jsonEncode({'reason': reason}))
+        .timeout(ApiConfig.timeout);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception(_errorFromResponse(res, 'Không cấm được tài khoản'));
+    }
+  }
+
+  Future<void> punishUser(
+    int userId, {
+    required int points,
+    String reason = 'Vi phạm quy định',
+  }) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/punish');
+    final res = await http
+        .post(
+          uri,
+          headers: _headers,
+          body: jsonEncode({'points': points, 'reason': reason}),
+        )
+        .timeout(ApiConfig.timeout);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception(_errorFromResponse(res, 'Không trừ điểm được'));
+    }
+  }
+
+  Future<void> deleteUser(int userId) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/delete');
+    final res = await http.post(uri, headers: _headers).timeout(ApiConfig.timeout);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception(_errorFromResponse(res, 'Không xóa được tài khoản'));
+    }
   }
 
 
@@ -391,6 +427,14 @@ class AdminService {
   }
 
 
+
+  Future<void> hideProduct(int productId) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/products/$productId/hide');
+    final res = await http.post(uri, headers: _headers).timeout(ApiConfig.timeout);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception(_errorFromResponse(res, 'Không ẩn được sản phẩm'));
+    }
+  }
 
   Future<void> resolveReport(int reportId, {String status = 'Resolved'}) async {
 

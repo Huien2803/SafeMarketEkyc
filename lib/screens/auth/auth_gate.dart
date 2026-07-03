@@ -69,14 +69,9 @@ class _AuthGateState extends State<AuthGate> {
             ),
           );
         }
-        return AnimatedBuilder(
-          animation: AuthService.instance,
-          builder: (_, _) {
-            return AuthService.instance.isLoggedIn
-                ? const MarketplaceHomeScreen()
-                : const LoginScreen();
-          },
-        );
+        // Cho phép khách (chưa đăng nhập) vào xem chợ; các tính năng cần
+        // tài khoản sẽ tự yêu cầu đăng nhập khi người dùng thao tác.
+        return const MarketplaceHomeScreen();
       },
     );
   }

@@ -9,6 +9,7 @@ import 'package:safemarket_app/services/api_config.dart';
 import 'package:safemarket_app/services/auth_service.dart';
 import 'package:safemarket_app/services/chat_service.dart';
 import 'package:safemarket_app/services/order_service.dart';
+import 'package:safemarket_app/services/payment_service.dart';
 import 'package:safemarket_app/services/review_service.dart';
 import 'package:safemarket_app/widgets/review_submit_dialog.dart';
 
@@ -149,6 +150,22 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     });
   }
 
+  Future<void> _payOnlineEscrow(OrderItem o) async {
+    await _run(() async {
+      final msg = await PaymentService.instance.payOrder(o.orderId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              msg ??
+                  'Hoàn tất thanh toán trên VNPay rồi quay lại app và làm mới đơn.',
+            ),
+          ),
+        );
+      }
+    });
+  }
+
   Future<void> _run(Future<void> Function() action) async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -219,8 +236,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       _InfoRow('Phương thức', o.methodSummary),
                       _InfoRow('Người bán', o.sellerName),
                       _InfoRow('Người mua', o.buyerName),
-                      if (o.escrowStatus != null)
+                      if (o.escrowStatus != null || o.isOnlineEscrow)
                         _InfoRow('Escrow', o.escrowLabel),
+                      if (o.isOnlineEscrow && o.escrowAmount > 0)
+                        _InfoRow(
+                          'Số tiền giữ',
+                          o.productPriceFormatted,
+                        ),
                       _InfoRow(o.addressLabel, o.shippingAddress),
                       if (o.disputeNote != null && o.disputeNote!.isNotEmpty)
                         _InfoRow('Ghi chú khiếu nại', o.disputeNote!),
@@ -274,7 +296,46 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   ),
                   const SizedBox(height: 12),
                 ],
-                if (o.isShipOrder && o.orderStatus == 'Pending')
+                if (o.isOnlineEscrow && o.orderStatus == 'Pending')
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppColors.primary.withValues(alpha: 0.25),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.lock_outline,
+                                size: 18, color: AppColors.primary),
+                            SizedBox(width: 8),
+                            Text(
+                              'Thanh toán Escrow SafeMarket',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          o.isDirectDelivery
+                              ? '1. Người mua thanh toán online → tiền tạm giữ tại app\n'
+                                  '2. Hẹn gặp giao hàng → người bán xác nhận\n'
+                                  '3. Người mua chụp ảnh xác nhận → tiền giải ngân cho người bán'
+                              : '1. Người mua thanh toán online → tiền tạm giữ\n'
+                                  '2. Người bán giao ship\n'
+                                  '3. Người mua xác nhận nhận hàng → giải ngân',
+                          style: const TextStyle(fontSize: 13, height: 1.45),
+                        ),
+                      ],
+                    ),
+                  ),
+                if (o.isShipOrder && o.orderStatus == 'Pending' && !o.isOnlineEscrow)
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -309,7 +370,32 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   label: const Text('Chat trực tiếp với chủ bán'),
                 ),
                 const SizedBox(height: 12),
-                if (_isSeller(o) && o.isShipOrder && o.orderStatus == 'Pending')
+                if (_isBuyer(o) && o.needsOnlinePayment) ...[
+                  FilledButton.icon(
+                    onPressed: _busy ? null : () => _payOnlineEscrow(o),
+                    icon: const Icon(Icons.payment_outlined),
+                    label: const Text('Thanh toán online (Escrow)'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.trustGreen,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                if (_isSeller(o) &&
+                    o.isOnlineEscrow &&
+                    o.isDirectDelivery &&
+                    o.orderStatus == 'Paid')
+                  FilledButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () => _run(() async {
+                              await OrderService.instance
+                                  .markDirectHandover(o.orderId);
+                            }),
+                    icon: const Icon(Icons.handshake_outlined),
+                    label: const Text('Đã giao hàng trực tiếp'),
+                  ),
+                if (_isSeller(o) && o.isShipOrder && o.orderStatus == 'Pending' && !o.isOnlineEscrow)
                   FilledButton.icon(
                     onPressed: _busy
                         ? null
@@ -352,7 +438,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     ((o.isShipOrder &&
                             (o.orderStatus == 'Paid' ||
                                 o.orderStatus == 'Shipped')) ||
-                        (o.isDirectOrder && o.orderStatus == 'Paid'))) ...[
+                        ((o.isDirectOrder || o.isOnlineEscrow) &&
+                            o.isDirectDelivery &&
+                            o.orderStatus == 'Paid'))) ...[
                   Container(
                     padding: const EdgeInsets.all(12),
                     margin: const EdgeInsets.only(bottom: 8),

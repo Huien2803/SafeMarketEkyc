@@ -23,6 +23,7 @@ import {
   DisputeOrderDto,
 } from './dto/order.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PaymentsService } from '../payments/payments.service';
 
 @Injectable()
 export class OrdersService {
@@ -33,6 +34,7 @@ export class OrdersService {
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(Review) private readonly reviewRepo: Repository<Review>,
     private readonly notificationsService: NotificationsService,
+    private readonly paymentsService: PaymentsService,
   ) {}
 
   async createOrder(buyerId: number, dto: CreateOrderDto): Promise<Record<string, unknown>> {
@@ -106,6 +108,7 @@ export class OrdersService {
         });
       }
     }
+    // ONLINE_ESCROW: thanh toán qua VNPay → tạo payment khi capture thành công
 
     return this.toOrderJson(saved.orderId);
   }
@@ -200,6 +203,17 @@ export class OrdersService {
     if (order.deliveryMethod !== 'DIRECT') {
       throw new BadRequestException('Chỉ áp dụng cho giao trực tiếp');
     }
+    if (order.paymentMethod === 'ONLINE_ESCROW') {
+      if (order.orderStatus !== 'Paid') {
+        throw new BadRequestException(
+          'Chờ người mua thanh toán online trước khi xác nhận giao hàng',
+        );
+      }
+      return this.toOrderJson(orderId);
+    }
+    if (order.orderStatus !== 'Pending') {
+      throw new BadRequestException('Không thể xác nhận giao');
+    }
     order.orderStatus = 'Paid';
     await this.orderRepo.save(order);
     return this.toOrderJson(orderId);
@@ -258,7 +272,9 @@ export class OrdersService {
     }
 
     const payment = await this.paymentRepo.findOne({ where: { orderId } });
-    if (payment) {
+    if (payment?.paymentMethod === 'ONLINE_ESCROW') {
+      await this.paymentsService.releaseEscrow(orderId);
+    } else if (payment) {
       payment.escrowStatus = 'Released';
       await this.paymentRepo.save(payment);
     }
@@ -284,7 +300,9 @@ export class OrdersService {
     }
 
     const payment = await this.paymentRepo.findOne({ where: { orderId } });
-    if (payment) {
+    if (payment?.paymentMethod === 'ONLINE_ESCROW') {
+      await this.paymentsService.refundEscrow(orderId);
+    } else if (payment) {
       payment.escrowStatus = 'Refunded';
       await this.paymentRepo.save(payment);
     }

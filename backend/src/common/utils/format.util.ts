@@ -8,6 +8,7 @@ export function formatVnd(amount: number): string {
 export const PAYMENT_LABELS: Record<string, string> = {
   BANK_TRANSFER: 'Chuyển khoản',
   CASH: 'Tiền mặt',
+  ONLINE_ESCROW: 'Thanh toán online (Escrow)',
 };
 
 export const DELIVERY_LABELS: Record<string, string> = {

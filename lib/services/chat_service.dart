@@ -75,11 +75,33 @@ class ChatService {
     );
   }
 
-  Future<void> sendImage(String threadId, String imageUrl) {
-    return _firebase.sendImageMessage(threadId, imageUrl);
+  Future<void> sendImage(
+    String threadId,
+    String imageUrl, {
+    ChatMessage? replyTo,
+  }) {
+    return _firebase.sendImageMessage(
+      threadId,
+      imageUrl,
+      replyTo: _replyMap(replyTo),
+    );
   }
 
-  Future<SendMessageResult> sendMessage(String threadId, String body) async {
+  Map<String, dynamic>? _replyMap(ChatMessage? replyTo) {
+    if (replyTo == null) return null;
+    return ReplyInfo(
+      messageId: replyTo.messageId,
+      senderName: replyTo.senderName,
+      preview: replyTo.replyPreview,
+      type: replyTo.messageType,
+    ).toMap();
+  }
+
+  Future<SendMessageResult> sendMessage(
+    String threadId,
+    String body, {
+    ChatMessage? replyTo,
+  }) async {
     final detail = await getThreadDetail(threadId);
     final myId = AuthService.instance.currentUser?.userId ?? 0;
     final peerId = myId == detail.buyerId ? detail.sellerId : detail.buyerId;
@@ -95,7 +117,7 @@ class ChatService {
       }
     } catch (_) {}
 
-    await _firebase.sendTextMessage(threadId, body);
+    await _firebase.sendTextMessage(threadId, body, replyTo: _replyMap(replyTo));
 
     final messages = await _firebase.watchMessages(threadId, myId).first;
     return SendMessageResult(messages: messages, scamWarning: scamWarning);
@@ -159,7 +181,24 @@ class ChatService {
       throw Exception('Chưa có đơn hàng để xác nhận');
     }
 
-    await OrderService.instance.markPaymentReceived(orderId);
+    final order = await OrderService.instance.getOrder(orderId);
+    if (order.isOnlineEscrow) {
+      if (order.orderStatus == 'Pending') {
+        throw Exception(
+          'Chờ người mua thanh toán online (escrow) trước khi xác nhận giao hàng.',
+        );
+      }
+      if (order.isDirectDelivery) {
+        await OrderService.instance.markDirectHandover(orderId);
+      } else if (order.orderStatus == 'Paid') {
+        await OrderService.instance.markShipped(orderId);
+      }
+    } else if (order.isDirectOrder) {
+      await OrderService.instance.markDirectHandover(orderId);
+    } else {
+      await OrderService.instance.markPaymentReceived(orderId);
+    }
+
     await _firebase.confirmSaleMessage(
       threadId: threadId,
       messageId: messageId,

@@ -45,13 +45,24 @@ class _LoginScreenState extends State<LoginScreen> {
           backgroundColor: AppColors.trustGreen,
         ),
       );
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(
-          builder: (_) => auth.user.isAdmin
-              ? const AdminDashboardScreen()
-              : const MarketplaceHomeScreen(),
-        ),
-      );
+      final nav = Navigator.of(context);
+      if (auth.user.isAdmin) {
+        nav.pushAndRemoveUntil(
+          MaterialPageRoute<void>(
+            builder: (_) => const AdminDashboardScreen(),
+          ),
+          (route) => false,
+        );
+      } else if (nav.canPop()) {
+        // Được mở từ một hành động cần đăng nhập (guard) → trả kết quả về.
+        nav.pop(true);
+      } else {
+        nav.pushReplacement(
+          MaterialPageRoute<void>(
+            builder: (_) => const MarketplaceHomeScreen(),
+          ),
+        );
+      }
     } on AuthException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -198,6 +209,25 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 4),
+                  TextButton.icon(
+                    onPressed: _loading
+                        ? null
+                        : () {
+                            final nav = Navigator.of(context);
+                            if (nav.canPop()) {
+                              nav.pop(false);
+                            } else {
+                              nav.pushReplacement(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => const MarketplaceHomeScreen(),
+                                ),
+                              );
+                            }
+                          },
+                    icon: const Icon(Icons.storefront_outlined, size: 18),
+                    label: const Text('Xem chợ với tư cách khách'),
                   ),
                   const Divider(height: 32),
                   const Text(

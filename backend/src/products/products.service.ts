@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, In, Like, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Product } from '../entities/product.entity';
 import { ProductImage } from '../entities/product-image.entity';
 import { Score } from '../entities/score.entity';
@@ -12,7 +12,7 @@ import { Review } from '../entities/review.entity';
 import { User } from '../entities/user.entity';
 import { CategoriesService } from './categories.service';
 import { CreateProductDto } from './dto/create-product.dto';
-import { ProductQueryDto } from './dto/product-query.dto';
+import { ProductQueryDto, ProductSort } from './dto/product-query.dto';
 import { toPublicUploadPath } from './product-upload.config';
 import { formatVnd } from '../common/utils/format.util';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -33,34 +33,86 @@ export class ProductsService {
   ) {}
 
   async findAll(query: ProductQueryDto): Promise<Record<string, unknown>[]> {
-    const base: FindOptionsWhere<Product> = {
-      status: In(['Available', 'Reserved']),
-    };
-    if (query.categoryId) base.categoryId = query.categoryId;
+    const qb = this.productRepo
+      .createQueryBuilder('p')
+      .leftJoinAndSelect('p.seller', 'seller')
+      .leftJoinAndSelect('p.category', 'category')
+      .where('p.status IN (:...statuses)', {
+        statuses: ['Available', 'Reserved'],
+      });
 
-    let where: FindOptionsWhere<Product> | FindOptionsWhere<Product>[] = base;
+    if (query.categoryId) {
+      qb.andWhere('p.categoryId = :categoryId', {
+        categoryId: query.categoryId,
+      });
+    }
+
     if (query.search?.trim()) {
       const keyword = `%${query.search.trim()}%`;
-      where = [
-        { ...base, title: Like(keyword) },
-        { ...base, description: Like(keyword) },
-        { ...base, location: Like(keyword) },
-      ];
+      qb.andWhere(
+        '(p.title LIKE :keyword OR p.description LIKE :keyword OR p.location LIKE :keyword)',
+        { keyword },
+      );
     }
 
-    const rows = await this.productRepo.find({
-      where,
-      relations: ['seller', 'category'],
-      order: { productId: 'DESC' },
-      take: 100,
-    });
+    if (query.minPrice != null) {
+      qb.andWhere('p.price >= :minPrice', { minPrice: query.minPrice });
+    }
+    if (query.maxPrice != null) {
+      qb.andWhere('p.price <= :maxPrice', { maxPrice: query.maxPrice });
+    }
 
-    let filtered = rows;
+    if (query.location?.trim()) {
+      const patterns = this.locationLikePatterns(query.location.trim());
+      const orClauses = patterns
+        .map((_, i) => `p.location LIKE :loc${i}`)
+        .join(' OR ');
+      const params = Object.fromEntries(
+        patterns.map((p, i) => [`loc${i}`, p]),
+      );
+      qb.andWhere(`(${orClauses})`, params);
+    }
+
     if (query.verifiedOnly) {
-      filtered = rows.filter((p) => p.seller?.kycStatus === 'Verified');
+      qb.andWhere('seller.kycStatus = :kyc', { kyc: 'Verified' });
     }
 
-    return Promise.all(filtered.map((p) => this.toListJson(p)));
+    switch (query.sort ?? ProductSort.NEWEST) {
+      case ProductSort.PRICE_ASC:
+        qb.orderBy('p.price', 'ASC').addOrderBy('p.productId', 'DESC');
+        break;
+      case ProductSort.PRICE_DESC:
+        qb.orderBy('p.price', 'DESC').addOrderBy('p.productId', 'DESC');
+        break;
+      case ProductSort.OLDEST:
+        qb.orderBy('p.productId', 'ASC');
+        break;
+      default:
+        qb.orderBy('p.productId', 'DESC');
+    }
+
+    qb.take(100);
+
+    const rows = await qb.getMany();
+    return Promise.all(rows.map((p) => this.toListJson(p)));
+  }
+
+  /** Một số tin ghi "TP.HCM" thay vì tên tỉnh đầy đủ — gom alias khi lọc. */
+  private locationLikePatterns(province: string): string[] {
+    const aliases: Record<string, string[]> = {
+      'TP. Hồ Chí Minh': [
+        '%TP. Hồ Chí Minh%',
+        '%TP.HCM%',
+        '%Hồ Chí Minh%',
+        '%Sài Gòn%',
+      ],
+      'Hà Nội': ['%Hà Nội%'],
+      'Đà Nẵng': ['%Đà Nẵng%'],
+      'Hải Phòng': ['%Hải Phòng%'],
+      'Cần Thơ': ['%Cần Thơ%'],
+      Huế: ['%Huế%', '%Thừa Thiên%'],
+    };
+    return aliases[province] ?? [`%${province}%`];
   }
 
   async findOne(productId: number): Promise<Record<string, unknown>> {
@@ -182,6 +234,7 @@ export class ProductsService {
       conditionPct: product.conditionPct,
       status: product.status,
       sellerName: seller.displayName ?? seller.email,
+      sellerId: Number(seller.userId),
       trustScore: score?.currentPoint ?? 500,
       sellerVerified: seller.kycStatus === 'Verified',
       categoryName: product.category?.name ?? '',

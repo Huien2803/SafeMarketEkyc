@@ -154,6 +154,43 @@ class ChatThreadDetail {
   }
 }
 
+/// Thông tin tin nhắn được trích dẫn khi trả lời (reply).
+class ReplyInfo {
+  const ReplyInfo({
+    required this.messageId,
+    required this.senderName,
+    required this.preview,
+    required this.type,
+  });
+
+  final String messageId;
+  final String senderName;
+
+  /// Đoạn xem trước nội dung tin nhắn gốc.
+  final String preview;
+  final String type;
+
+  Map<String, dynamic> toMap() => {
+        'messageId': messageId,
+        'senderName': senderName,
+        'preview': preview,
+        'type': type,
+      };
+
+  static ReplyInfo? fromMap(dynamic raw) {
+    if (raw is! Map) return null;
+    final m = Map<dynamic, dynamic>.from(raw);
+    final id = m['messageId']?.toString() ?? '';
+    if (id.isEmpty) return null;
+    return ReplyInfo(
+      messageId: id,
+      senderName: m['senderName']?.toString() ?? '',
+      preview: m['preview']?.toString() ?? '',
+      type: m['type']?.toString() ?? 'TEXT',
+    );
+  }
+}
+
 class ChatMessage {
   const ChatMessage({
     required this.messageId,
@@ -165,6 +202,7 @@ class ChatMessage {
     required this.meta,
     required this.createdAt,
     required this.mine,
+    this.replyTo,
   });
 
   final String messageId;
@@ -176,6 +214,16 @@ class ChatMessage {
   final Map<String, dynamic> meta;
   final DateTime createdAt;
   final bool mine;
+  final ReplyInfo? replyTo;
+
+  /// Đoạn xem trước dùng khi tin nhắn này được trích dẫn để trả lời.
+  String get replyPreview {
+    if (isImage) return '📷 Hình ảnh';
+    if (isProductCard) return 'Sản phẩm';
+    if (isPurchaseRequest) return 'Yêu cầu đặt mua';
+    if (isSaleConfirmed) return 'Đã xác nhận bán';
+    return body;
+  }
 
   bool get isProductCard => messageType == 'PRODUCT_CARD';
   bool get isImage => messageType == 'IMAGE';
@@ -196,6 +244,7 @@ class ChatMessage {
       meta: _parseMeta(rawMeta),
       createdAt: ChatThread._parseTime(json['createdAt']),
       mine: json['mine'] as bool? ?? false,
+      replyTo: ReplyInfo.fromMap(json['replyTo']),
     );
   }
 
@@ -215,6 +264,7 @@ class ChatMessage {
       meta: _parseMeta(data['meta']),
       createdAt: ChatThread._parseTime(data['createdAt']),
       mine: (data['senderId'] as num).toInt() == myUserId,
+      replyTo: ReplyInfo.fromMap(data['replyTo']),
     );
   }
 

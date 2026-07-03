@@ -15,6 +15,7 @@ import { UserProfileDto } from './dto/user-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { OrdersService } from '../orders/orders.service';
 import { FollowsService } from '../follows/follows.service';
+import { toPublicAvatarPath } from './avatar-upload.config';
 
 @Injectable()
 export class UsersService {
@@ -140,6 +141,18 @@ export class UsersService {
       user.avatarUrl = url.length === 0 ? null : url;
     }
 
+    await this.userRepo.save(user);
+    return this.getProfile(userId);
+  }
+
+  /** Cập nhật ảnh đại diện từ file đã upload (lưu đường dẫn /uploads/avatars/...). */
+  async updateAvatarFile(
+    userId: number,
+    filename: string,
+  ): Promise<UserProfileDto> {
+    const user = await this.userRepo.findOne({ where: { userId } });
+    if (!user) throw new NotFoundException('Người dùng không tồn tại');
+    user.avatarUrl = toPublicAvatarPath(filename);
     await this.userRepo.save(user);
     return this.getProfile(userId);
   }

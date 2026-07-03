@@ -1,15 +1,22 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
   Param,
   ParseIntPipe,
+  Post,
   Put,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiOperation,
   ApiResponse,
   ApiTags,
@@ -19,6 +26,10 @@ import { UserProfileDto } from './dto/user-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { User } from '../entities/user.entity';
+import {
+  avatarImageFilter,
+  avatarStorage,
+} from './avatar-upload.config';
 
 @ApiTags('users')
 @ApiBearerAuth('JWT-auth')
@@ -39,6 +50,34 @@ export class UsersController {
   @ApiResponse({ status: 200, type: UserProfileDto })
   updateMe(@CurrentUser() user: User, @Body() dto: UpdateProfileDto) {
     return this.usersService.updateProfile(Number(user.userId), dto);
+  }
+
+  @Post('me/avatar')
+  @ApiOperation({ summary: 'Tải lên ảnh đại diện (file ảnh, không dùng URL)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { avatar: { type: 'string', format: 'binary' } },
+      required: ['avatar'],
+    },
+  })
+  @ApiResponse({ status: 201, type: UserProfileDto })
+  @UseInterceptors(
+    FileInterceptor('avatar', {
+      storage: avatarStorage,
+      fileFilter: avatarImageFilter,
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
+  )
+  uploadAvatar(
+    @CurrentUser() user: User,
+    @UploadedFile() file?: Express.Multer.File,
+  ): Promise<UserProfileDto> {
+    if (!file?.filename) {
+      throw new BadRequestException('Thiếu file ảnh đại diện');
+    }
+    return this.usersService.updateAvatarFile(Number(user.userId), file.filename);
   }
 
   @Get('me/sold-products')

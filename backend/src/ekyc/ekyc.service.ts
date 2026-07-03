@@ -21,8 +21,14 @@ import { EkycStatusDto } from './dto/ekyc-status.dto';
 export class EkycService {
   private readonly logger = new Logger(EkycService.name);
 
-  /** Ngưỡng similarity face match. >= 0.75 => coi như verified. */
-  private readonly FACE_MATCH_THRESHOLD = 0.75;
+  /** Ngưỡng similarity face match. >= 0.72 => coi như verified (luồng cũ). */
+  private readonly FACE_MATCH_THRESHOLD = 0.72;
+
+  /**
+   * Số điểm nhận dạng khuôn mặt tối thiểu cần lấy được ở bước liveness.
+   * Một khuôn mặt frontal thường cho >= 5 landmark (2 mắt, mũi, 2 góc miệng...).
+   */
+  private readonly MIN_RECOGNITION_POINTS = 4;
 
   constructor(
     @InjectRepository(EkycProfile)
@@ -40,11 +46,28 @@ export class EkycService {
    *   3. Set trạng thái Pending — admin duyệt qua /admin/ekyc/:id/approve
    */
   async submit(userId: number, dto: SubmitEkycDto): Promise<EkycStatusDto> {
-    if (dto.faceSimilarity < this.FACE_MATCH_THRESHOLD) {
+    // Luồng mới: xác thực bằng ĐIỂM NHẬN DẠNG khuôn mặt lấy ở bước liveness,
+    // thay cho việc so khớp với ảnh trên CCCD (FPT.AI face-match).
+    const points = dto.recognitionPoints;
+    if (points != null) {
+      if (!dto.livenessToken) {
+        throw new BadRequestException(
+          'Thiếu xác minh khuôn mặt thật (liveness). Vui lòng quét lại khuôn mặt.',
+        );
+      }
+      if (points < this.MIN_RECOGNITION_POINTS) {
+        throw new BadRequestException(
+          `Chưa lấy đủ điểm nhận dạng khuôn mặt (${points} < ${this.MIN_RECOGNITION_POINTS}). ` +
+            'Vui lòng quét lại khuôn mặt rõ hơn.',
+        );
+      }
+    } else if (
+      dto.faceSimilarity == null ||
+      dto.faceSimilarity < this.FACE_MATCH_THRESHOLD
+    ) {
+      // Tương thích ngược: nếu không gửi recognitionPoints thì vẫn dùng similarity.
       throw new BadRequestException(
-        `Khuôn mặt không khớp với CCCD (similarity ${dto.faceSimilarity.toFixed(
-          2,
-        )} < ${this.FACE_MATCH_THRESHOLD}). Vui lòng chụp lại.`,
+        'Chưa lấy được điểm nhận dạng khuôn mặt. Vui lòng quét lại khuôn mặt.',
       );
     }
 
@@ -90,7 +113,7 @@ export class EkycService {
     const refreshed = await this.userRepo.findOne({ where: { userId } });
 
     this.logger.log(
-      `eKYC user ${userId} submitted (Pending), similarity=${dto.faceSimilarity}`,
+      `eKYC user ${userId} submitted (Pending), recognitionPoints=${dto.recognitionPoints ?? '-'}, similarity=${dto.faceSimilarity ?? '-'}`,
     );
 
     return this.toStatusDto(refreshed!, profile);

@@ -7,13 +7,14 @@ import { Report } from '../entities/report.entity';
 import { EkycProfile } from '../entities/ekyc-profile.entity';
 import { Order } from '../entities/order.entity';
 import { Product } from '../entities/product.entity';
+import { PointLog } from '../entities/point-log.entity';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { AdminGuard } from '../common/guards/admin.guard';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Score, Report, EkycProfile, Order, Product]),
+    TypeOrmModule.forFeature([User, Score, PointLog, Report, EkycProfile, Order, Product]),
     AuthModule,
   ],
   controllers: [AdminController],

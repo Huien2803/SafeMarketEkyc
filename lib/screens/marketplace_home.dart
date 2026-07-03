@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:safemarket_app/core/constants/app_decorations.dart';
+import 'package:safemarket_app/core/constants/category_icons.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
+import 'package:safemarket_app/models/product_filters.dart';
 import 'package:safemarket_app/models/favorite_product.dart';
 import 'package:safemarket_app/models/product.dart';
 import 'package:safemarket_app/services/product_service.dart';
@@ -18,7 +20,10 @@ import 'package:safemarket_app/services/auth_service.dart';
 import 'package:safemarket_app/services/chat_service.dart';
 import 'package:safemarket_app/services/user_service.dart';
 import 'package:safemarket_app/widgets/count_badge.dart';
+import 'package:safemarket_app/widgets/login_required.dart';
+import 'package:safemarket_app/widgets/product_filter_sheet.dart';
 import 'package:safemarket_app/widgets/product_thumbnail.dart';
+import 'package:safemarket_app/widgets/report_violation_sheet.dart';
 import 'package:safemarket_app/widgets/trust_gauge.dart';
 
 /// Màn hình "shell" của app sau khi đăng nhập.
@@ -64,15 +69,28 @@ class _MarketplaceHomeScreenState extends State<MarketplaceHomeScreen> {
 
   void _goHome() => _switchTab(0);
 
-  Future<void> _openPostProduct() async {
-    if (!AuthService.instance.isLoggedIn) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vui lòng đăng nhập để đăng bán sản phẩm')),
+  /// Tab Chat và Tôi yêu cầu đăng nhập — khách sẽ được mời đăng nhập.
+  Future<void> _onNavTap(int index) async {
+    if ((index == 2 || index == 3) && !AuthService.instance.isLoggedIn) {
+      final ok = await ensureLoggedIn(
+        context,
+        message: index == 2
+            ? 'Đăng nhập để xem và trả lời tin nhắn với người bán.'
+            : 'Đăng nhập để xem hồ sơ và quản lý tài khoản của bạn.',
       );
-      return;
+      if (!ok || !mounted) return;
+      _homeTabKey.currentState?.reloadProducts();
     }
-    if (!mounted) return;
+    _switchTab(index);
+  }
+
+  Future<void> _openPostProduct() async {
+    final ok = await ensureLoggedIn(
+      context,
+      message: 'Đăng nhập để đăng bán sản phẩm của bạn.',
+    );
+    if (!ok || !mounted) return;
+    _homeTabKey.currentState?.reloadProducts();
     final posted = await Navigator.push<bool>(
       context,
       MaterialPageRoute(builder: (_) => const PostProductScreen()),
@@ -132,13 +150,13 @@ class _MarketplaceHomeScreenState extends State<MarketplaceHomeScreen> {
                   icon: Icons.home,
                   label: 'CHỦ',
                   selected: _bottomIndex == 0,
-                  onTap: () => _switchTab(0),
+                  onTap: () => _onNavTap(0),
                 ),
                 _NavItem(
                   icon: Icons.favorite_border,
                   label: 'YÊU THÍCH',
                   selected: _bottomIndex == 1,
-                  onTap: () => _switchTab(1),
+                  onTap: () => _onNavTap(1),
                 ),
                 const SizedBox(width: 48), // khoảng cho FAB
                 _NavItem(
@@ -146,13 +164,13 @@ class _MarketplaceHomeScreenState extends State<MarketplaceHomeScreen> {
                   label: 'CHAT',
                   selected: _bottomIndex == 2,
                   badgeCount: _chatUnread,
-                  onTap: () => _switchTab(2),
+                  onTap: () => _onNavTap(2),
                 ),
                 _NavItem(
                   icon: Icons.person_outline,
                   label: 'TÔI',
                   selected: _bottomIndex == 3,
-                  onTap: () => _switchTab(3),
+                  onTap: () => _onNavTap(3),
                 ),
               ],
             ),
@@ -177,6 +195,7 @@ class _HomeTabState extends State<_HomeTab>
     with AutomaticKeepAliveClientMixin {
   int _selectedCategoryId = 0;
   bool _verifiedOnly = false;
+  ProductFilters _filters = ProductFilters.empty;
   final _searchCtrl = TextEditingController();
   List<ProductCategory> _apiCategories = [];
   List<ProductListItem> _products = [];
@@ -185,7 +204,10 @@ class _HomeTabState extends State<_HomeTab>
   int? _myTrustScore;
   String? _myRankLabel;
 
-  void reloadProducts() => _loadAll();
+  void reloadProducts() {
+    _loadAll();
+    _loadTrustScore();
+  }
 
   @override
   void initState() {
@@ -214,8 +236,38 @@ class _HomeTabState extends State<_HomeTab>
     super.dispose();
   }
 
-  void _openNotifications() {
-    Navigator.push(
+  Future<void> _openFilters() async {
+    final result = await showProductFilterSheet(
+      context,
+      initial: _filters,
+    );
+    if (result == null || !mounted) return;
+    setState(() => _filters = result);
+    _loadAll();
+  }
+
+  void _clearFilters() {
+    setState(() => _filters = ProductFilters.empty);
+    _loadAll();
+  }
+
+  String _formatVnd(int value) {
+    final s = value.toString();
+    final buf = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write('.');
+      buf.write(s[i]);
+    }
+    return buf.toString();
+  }
+
+  Future<void> _openNotifications() async {
+    final ok = await ensureLoggedIn(
+      context,
+      message: 'Đăng nhập để xem thông báo của bạn.',
+    );
+    if (!ok || !mounted) return;
+    await Navigator.push(
       context,
       MaterialPageRoute<void>(
         builder: (_) => const NotificationsScreen(),
@@ -234,6 +286,7 @@ class _HomeTabState extends State<_HomeTab>
         categoryId: _selectedCategoryId == 0 ? null : _selectedCategoryId,
         search: _searchCtrl.text,
         verifiedOnly: _verifiedOnly,
+        filters: _filters,
       );
       if (!mounted) return;
       setState(() {
@@ -244,7 +297,8 @@ class _HomeTabState extends State<_HomeTab>
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e.toString().replaceFirst('Exception: ', '');
+        _products = [];
         _loading = false;
       });
     }
@@ -252,11 +306,11 @@ class _HomeTabState extends State<_HomeTab>
 
   List<_CategoryItem> get _categories {
     final list = <_CategoryItem>[
-      const _CategoryItem('TẤT CẢ', Icons.auto_awesome, isAll: true),
+      const _CategoryItem('TẤT CẢ', kAllCategoriesIcon, isAll: true),
     ];
     for (final c in _apiCategories) {
       list.add(
-        _CategoryItem(c.name, Icons.category_outlined, id: c.categoryId),
+        _CategoryItem(c.name, categoryIconFor(c.name), id: c.categoryId),
       );
     }
     return list;
@@ -283,12 +337,40 @@ class _HomeTabState extends State<_HomeTab>
               ),
             SliverToBoxAdapter(child: _buildSearchRow()),
             SliverToBoxAdapter(child: _buildCategories()),
-            SliverToBoxAdapter(child: _buildSectionTitle()),
+            if (!_loading && _error == null)
+              SliverToBoxAdapter(child: _buildSectionTitle()),
             if (_loading)
               const SliverFillRemaining(
                 child: Center(child: CircularProgressIndicator()),
               )
             else if (_error != null)
+              SliverFillRemaining(
+                hasScrollBody: true,
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(24, 16, 24, 100),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.cloud_off, size: 48),
+                      const SizedBox(height: 12),
+                      Text(_error!, textAlign: TextAlign.center),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Đảm bảo backend NestJS đang chạy: cd backend && npm run start:dev',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: AppColors.textSecondary),
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton(
+                        onPressed: _loadAll,
+                        child: const Text('Thử lại'),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else if (_products.isEmpty)
               SliverFillRemaining(
                 child: Center(
                   child: Padding(
@@ -296,27 +378,31 @@ class _HomeTabState extends State<_HomeTab>
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.cloud_off, size: 48),
-                        const SizedBox(height: 12),
-                        Text(_error!, textAlign: TextAlign.center),
+                        Icon(
+                          _filters.hasActiveFilters || _searchCtrl.text.isNotEmpty
+                              ? Icons.search_off
+                              : Icons.inventory_2_outlined,
+                          size: 48,
+                          color: AppColors.textMuted,
+                        ),
                         const SizedBox(height: 12),
                         Text(
-                          'Chạy backend NestJS: cd backend && npm run start:dev (port 3000)',
+                          _filters.hasActiveFilters || _searchCtrl.text.isNotEmpty
+                              ? 'Không có sản phẩm phù hợp bộ lọc'
+                              : 'Không có sản phẩm',
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: AppColors.textSecondary),
                         ),
-                        FilledButton(
-                          onPressed: _loadAll,
-                          child: const Text('Thử lại'),
-                        ),
+                        if (_filters.hasActiveFilters) ...[
+                          const SizedBox(height: 12),
+                          TextButton(
+                            onPressed: _clearFilters,
+                            child: const Text('Xóa bộ lọc'),
+                          ),
+                        ],
                       ],
                     ),
                   ),
                 ),
-              )
-            else if (_products.isEmpty)
-              const SliverFillRemaining(
-                child: Center(child: Text('Không có sản phẩm')),
               )
             else
               SliverPadding(
@@ -326,7 +412,7 @@ class _HomeTabState extends State<_HomeTab>
                     crossAxisCount: 2,
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
-                    childAspectRatio: 0.72,
+                    childAspectRatio: 0.64,
                   ),
                   delegate: SliverChildBuilderDelegate(
                     (context, index) {
@@ -403,6 +489,7 @@ class _HomeTabState extends State<_HomeTab>
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
@@ -420,39 +507,146 @@ class _HomeTabState extends State<_HomeTab>
           ),
           const SizedBox(height: 8),
           Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _searchCtrl,
-              onSubmitted: (_) => _loadAll(),
-              decoration: InputDecoration(
-                hintText: 'Tìm sản phẩm, người bán uy tín',
-                prefixIcon: const Icon(Icons.search, color: AppColors.textMuted),
-                filled: true,
-                fillColor: AppColors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide.none,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _searchCtrl,
+                  onSubmitted: (_) => _loadAll(),
+                  decoration: InputDecoration(
+                    hintText: 'Tìm sản phẩm, người bán uy tín',
+                    prefixIcon: const Icon(
+                      Icons.search,
+                      color: AppColors.textMuted,
+                    ),
+                    filled: true,
+                    fillColor: AppColors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Material(
-            color: AppColors.primary,
-            borderRadius: BorderRadius.circular(14),
-            child: InkWell(
-              onTap: _loadAll,
-              borderRadius: BorderRadius.circular(14),
-              child: const SizedBox(
-                width: 48,
-                height: 48,
-                child: Icon(Icons.search, color: AppColors.white),
+              const SizedBox(width: 8),
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Material(
+                    color: _filters.hasActiveFilters
+                        ? AppColors.primary.withValues(alpha: 0.12)
+                        : AppColors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    child: InkWell(
+                      onTap: _openFilters,
+                      borderRadius: BorderRadius.circular(14),
+                      child: SizedBox(
+                        width: 48,
+                        height: 48,
+                        child: Icon(
+                          Icons.tune,
+                          color: _filters.hasActiveFilters
+                              ? AppColors.primary
+                              : AppColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (_filters.activeCount > 0)
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: Container(
+                        width: 18,
+                        height: 18,
+                        alignment: Alignment.center,
+                        decoration: const BoxDecoration(
+                          color: AppColors.primary,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          '${_filters.activeCount}',
+                          style: const TextStyle(
+                            color: AppColors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
-            ),
+              const SizedBox(width: 8),
+              Material(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(14),
+                child: InkWell(
+                  onTap: _loadAll,
+                  borderRadius: BorderRadius.circular(14),
+                  child: const SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: Icon(Icons.search, color: AppColors.white),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+          if (_filters.hasActiveFilters) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                if (_filters.location != null)
+                  Chip(
+                    label: Text(_filters.location!),
+                    deleteIcon: const Icon(Icons.close, size: 16),
+                    onDeleted: () {
+                      setState(() {
+                        _filters = _filters.copyWith(clearLocation: true);
+                      });
+                      _loadAll();
+                    },
+                  ),
+                if (_filters.minPrice != null || _filters.maxPrice != null)
+                  Chip(
+                    label: Text(
+                      _filters.minPrice != null && _filters.maxPrice != null
+                          ? '${_formatVnd(_filters.minPrice!)} – ${_formatVnd(_filters.maxPrice!)} đ'
+                          : _filters.minPrice != null
+                              ? 'Từ ${_formatVnd(_filters.minPrice!)} đ'
+                              : 'Đến ${_formatVnd(_filters.maxPrice!)} đ',
+                    ),
+                    deleteIcon: const Icon(Icons.close, size: 16),
+                    onDeleted: () {
+                      setState(() {
+                        _filters = _filters.copyWith(
+                          clearMinPrice: true,
+                          clearMaxPrice: true,
+                        );
+                      });
+                      _loadAll();
+                    },
+                  ),
+                if (_filters.sort != ProductSort.newest)
+                  Chip(
+                    label: Text(_filters.sort.label),
+                    deleteIcon: const Icon(Icons.close, size: 16),
+                    onDeleted: () {
+                      setState(() {
+                        _filters = _filters.copyWith(sort: ProductSort.newest);
+                      });
+                      _loadAll();
+                    },
+                  ),
+                TextButton(
+                  onPressed: _clearFilters,
+                  child: const Text('Xóa tất cả'),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -511,23 +705,73 @@ class _HomeTabState extends State<_HomeTab>
   }
 
   Widget _buildSectionTitle() {
-    return const Padding(
-      padding: EdgeInsets.fromLTRB(20, 16, 20, 12),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
       child: Row(
         children: [
-          Icon(Icons.local_fire_department,
-              color: Color(0xFFF97316), size: 22),
-          SizedBox(width: 6),
-          Text(
-            'DÀNH CHO BẠN',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-              color: AppColors.textPrimary,
+          const Icon(
+            Icons.local_fire_department,
+            color: Color(0xFFF97316),
+            size: 22,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              _loading
+                  ? 'ĐANG TẢI...'
+                  : '${_products.length} KẾT QUẢ',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textPrimary,
+              ),
             ),
           ),
-          Spacer(),
-          Icon(Icons.grid_view, color: AppColors.textMuted, size: 20),
+          PopupMenuButton<ProductSort>(
+            tooltip: 'Sắp xếp',
+            onSelected: (sort) {
+              setState(() => _filters = _filters.copyWith(sort: sort));
+              _loadAll();
+            },
+            itemBuilder: (ctx) => ProductSort.values
+                .map(
+                  (s) => PopupMenuItem(
+                    value: s,
+                    child: Row(
+                      children: [
+                        if (_filters.sort == s)
+                          const Icon(Icons.check, size: 18, color: AppColors.primary)
+                        else
+                          const SizedBox(width: 18),
+                        const SizedBox(width: 8),
+                        Text(s.label),
+                      ],
+                    ),
+                  ),
+                )
+                .toList(),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.sort, size: 18, color: AppColors.textMuted),
+                  const SizedBox(width: 4),
+                  Text(
+                    _filters.sort.label,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -775,6 +1019,29 @@ class _ProductCard extends StatelessWidget {
                             ),
                           ),
                         ),
+                        if (AuthService.instance.isLoggedIn &&
+                            product.sellerId != null &&
+                            AuthService.instance.currentUser?.userId !=
+                                product.sellerId)
+                          GestureDetector(
+                            onTap: () async {
+                              await showReportViolationSheet(
+                                context,
+                                reportedUserId: product.sellerId!,
+                                targetLabel: product.sellerName,
+                                productId: product.id,
+                                productTitle: product.title,
+                              );
+                            },
+                            child: const Padding(
+                              padding: EdgeInsets.only(left: 4),
+                              child: Icon(
+                                Icons.flag_outlined,
+                                size: 16,
+                                color: AppColors.textMuted,
+                              ),
+                            ),
+                          ),
                         if (product.sellerVerified)
                           const Icon(Icons.verified,
                               size: 14, color: AppColors.primary),

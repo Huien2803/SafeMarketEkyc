@@ -69,13 +69,33 @@ export class FptAiService {
 
   /**
    * Quét MẶT TRƯỚC CCCD/CMND, trả về số CCCD, họ tên, ngày sinh, địa chỉ...
+   *
+   * FPT.AI trả về field `type` để phân biệt mặt: front/chip_front/new_front
+   * (mặt trước) vs back/chip_back/new_back (mặt sau). Ta CHẶN nếu người dùng
+   * chụp nhầm mặt sau, và yêu cầu phải đọc được số CCCD + họ tên.
    */
   async scanIdCardFront(file: Express.Multer.File): Promise<IdCardFrontOcr> {
     const data = await this.callOcr(file);
+    const type = String(data.type ?? '').toLowerCase();
+
+    if (type.includes('back')) {
+      throw new BadRequestException(
+        'Bạn đang chụp MẶT SAU. Vui lòng chụp MẶT TRƯỚC CCCD (mặt có ảnh chân dung và số CCCD).',
+      );
+    }
+
+    const idNumber = String(data.id ?? '').trim();
+    const fullName = String(data.name ?? '').trim();
+    // Mặt trước hợp lệ phải đọc được số CCCD và họ tên.
+    if (!idNumber || !fullName) {
+      throw new BadRequestException(
+        'Không đọc được số CCCD / họ tên ở mặt trước. Hãy chụp rõ nét, đủ 4 góc, tránh lóa sáng và đúng MẶT TRƯỚC.',
+      );
+    }
 
     return {
-      idNumber: String(data.id ?? ''),
-      fullName: String(data.name ?? ''),
+      idNumber,
+      fullName,
       dob: String(data.dob ?? ''),
       sex: String(data.sex ?? ''),
       nationality: String(data.nationality ?? ''),
@@ -89,15 +109,41 @@ export class FptAiService {
 
   /**
    * Quét MẶT SAU CCCD/CMND, trả về đặc điểm nhận dạng + ngày cấp + nơi cấp.
+   * CHẶN nếu người dùng chụp nhầm mặt trước.
    */
   async scanIdCardBack(file: Express.Multer.File): Promise<IdCardBackOcr> {
     const data = await this.callOcr(file);
+    const type = String(data.type ?? '').toLowerCase();
+
+    // Mặt trước có số CCCD (id) — nếu thấy id/name mà không có dữ liệu mặt sau
+    // thì người dùng đang chụp nhầm mặt trước.
+    const looksLikeFront =
+      type.includes('front') ||
+      (!!String(data.id ?? '').trim() && !!String(data.name ?? '').trim());
+
+    const features = String(data.features ?? '').trim();
+    const issueDate = String(data.issue_date ?? '').trim();
+    const issueLoc = String(data.issue_loc ?? '').trim();
+    const mrz = data.mrz ? String(data.mrz) : '';
+    const hasBackData = !!(features || issueDate || issueLoc || mrz);
+
+    if (looksLikeFront && !hasBackData) {
+      throw new BadRequestException(
+        'Bạn đang chụp MẶT TRƯỚC. Vui lòng chụp MẶT SAU CCCD (mặt có ngày cấp, nơi cấp, đặc điểm nhận dạng).',
+      );
+    }
+
+    if (!hasBackData) {
+      throw new BadRequestException(
+        'Không đọc được thông tin mặt sau (ngày cấp / nơi cấp). Hãy chụp rõ nét, đúng MẶT SAU CCCD.',
+      );
+    }
 
     return {
-      features: String(data.features ?? ''),
-      issueDate: String(data.issue_date ?? ''),
-      issueLoc: String(data.issue_loc ?? ''),
-      mrzText: data.mrz ? String(data.mrz) : undefined,
+      features,
+      issueDate,
+      issueLoc,
+      mrzText: mrz || undefined,
       rawResponse: data,
     };
   }
@@ -137,7 +183,12 @@ export class FptAiService {
       }
 
       const similarity = Number(body.similarity ?? 0);
-      const isMatch = String(body.isMatch ?? 'false') === 'true' || similarity >= 0.8;
+      // Ảnh chân dung trên CCCD độ phân giải thấp nên dùng ngưỡng 0.72
+      // (đồng bộ với EkycService.FACE_MATCH_THRESHOLD). FPT có thể trả
+      // isMatch dưới dạng boolean hoặc chuỗi 'true'/'false'.
+      const fptSaysMatch =
+        body.isMatch === true || String(body.isMatch ?? '') === 'true';
+      const isMatch = fptSaysMatch || similarity >= 0.72;
 
       return {
         isMatch,

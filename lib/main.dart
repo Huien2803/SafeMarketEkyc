@@ -2,6 +2,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:safemarket_app/core/theme/app_theme.dart';
 import 'package:safemarket_app/firebase_options.dart';
+import 'package:safemarket_app/services/api_config.dart';
 import 'package:safemarket_app/screens/admin_dashboard.dart';
 import 'package:safemarket_app/screens/auth/auth_gate.dart';
 import 'package:safemarket_app/screens/auth/login_screen.dart';
@@ -13,6 +14,8 @@ import 'package:safemarket_app/screens/profile_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Tự dò địa chỉ server backend phù hợp với thiết bị đang chạy.
+  await ApiConfig.resolveBaseUrl();
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,

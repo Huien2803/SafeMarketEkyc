@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:safemarket_app/core/constants/vn_provinces.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
-import 'package:safemarket_app/screens/marketplace_home.dart';
+import 'package:safemarket_app/screens/auth/otp_verification_screen.dart';
 import 'package:safemarket_app/services/auth_service.dart';
 import 'package:safemarket_app/utils/input_validators.dart';
 
@@ -17,9 +18,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _displayNameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
-  final _locationCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
+  String? _selectedProvince;
 
   bool _showPassword = false;
   bool _loading = false;
@@ -31,7 +32,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _displayNameCtrl.dispose();
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
-    _locationCtrl.dispose();
     _passwordCtrl.dispose();
     _confirmCtrl.dispose();
     super.dispose();
@@ -43,27 +43,62 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _loading = true);
 
     try {
-      final auth = await AuthService.instance.register(
-        phoneNumber: _phoneCtrl.text.trim(),
-        email: _emailCtrl.text.trim(),
-        password: _passwordCtrl.text,
-        displayName: _displayNameCtrl.text.trim(),
-        location: _locationCtrl.text.trim(),
+      final email = _emailCtrl.text.trim();
+      final phone = _phoneCtrl.text.trim();
+      final password = _passwordCtrl.text;
+      final displayName = _displayNameCtrl.text.trim();
+      final location = _selectedProvince ?? '';
+
+      final otpResult = await AuthService.instance.requestRegisterOtp(
+        phoneNumber: phone,
+        email: email,
+        password: password,
+        displayName: displayName,
+        location: location,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Đăng ký thành công! Chào ${auth.user.displayName ?? auth.user.email}',
+
+      if (otpResult.devOtp != null) {
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Mã OTP (dev)'),
+            content: Text(
+              'SMTP chưa cấu hình — mã OTP của bạn:\n\n'
+              '${otpResult.devOtp}\n\n'
+              'Mã cũng được in trong console backend.',
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Đã hiểu'),
+              ),
+            ],
           ),
-          backgroundColor: AppColors.trustGreen,
-        ),
-      );
-      Navigator.of(context).pushAndRemoveUntil(
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              otpResult.message ?? 'Đã gửi mã OTP tới email của bạn',
+            ),
+            backgroundColor: AppColors.trustGreen,
+          ),
+        );
+      }
+
+      Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) => const MarketplaceHomeScreen(),
+          builder: (_) => OtpVerificationScreen(
+            email: email,
+            phoneNumber: phone,
+            password: password,
+            displayName: displayName,
+            location: location.isEmpty ? null : location,
+            expiresInSeconds: otpResult.expiresInSeconds,
+            devOtp: otpResult.devOtp,
+          ),
         ),
-        (_) => false,
       );
     } on AuthException catch (e) {
       if (!mounted) return;
@@ -126,7 +161,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   label: 'Số điện thoại (10 số)',
                   icon: Icons.phone_outlined,
                   keyboardType: TextInputType.phone,
-                  inputFormatters: const [
+                  inputFormatters: [
                     FilteringTextInputFormatter.digitsOnly,
                     LengthLimitingTextInputFormatter(10),
                   ],
@@ -146,11 +181,35 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   },
                 ),
                 const SizedBox(height: 12),
-                _buildField(
-                  controller: _locationCtrl,
-                  label: 'Thành phố (tuỳ chọn)',
-                  icon: Icons.location_on_outlined,
-                  validator: (_) => null,
+                DropdownButtonFormField<String>(
+                  initialValue: _selectedProvince,
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    labelText: 'Tỉnh / Thành phố',
+                    prefixIcon: const Icon(Icons.location_on_outlined),
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                  ),
+                  hint: const Text('Chọn tỉnh/thành phố'),
+                  items: kVietnamProvinces
+                      .map(
+                        (p) => DropdownMenuItem<String>(
+                          value: p,
+                          child: Text(p),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) => setState(() => _selectedProvince = v),
+                  validator: (v) =>
+                      v == null || v.isEmpty ? 'Vui lòng chọn tỉnh/thành phố' : null,
                 ),
                 const SizedBox(height: 12),
                 const Text(

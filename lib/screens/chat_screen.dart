@@ -30,11 +30,20 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final _controller = TextEditingController();
+  final _inputFocus = FocusNode();
   ChatThreadDetail? _thread;
   bool _loadingThread = true;
   bool _busy = false;
   StreamSubscription<List<ChatMessage>>? _msgSub;
   List<ChatMessage> _messages = [];
+  ChatMessage? _replyingTo;
+
+  void _startReply(ChatMessage msg) {
+    setState(() => _replyingTo = msg);
+    _inputFocus.requestFocus();
+  }
+
+  void _cancelReply() => setState(() => _replyingTo = null);
 
   @override
   void initState() {
@@ -54,6 +63,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _msgSub?.cancel();
     _controller.dispose();
+    _inputFocus.dispose();
     super.dispose();
   }
 
@@ -77,11 +87,15 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _send() async {
     final text = _controller.text.trim();
     if (text.isEmpty || _busy) return;
-    setState(() => _busy = true);
+    final replyTo = _replyingTo;
+    setState(() {
+      _busy = true;
+      _replyingTo = null;
+    });
     _controller.clear();
     try {
-      final result =
-          await ChatService.instance.sendMessage(widget.threadId, text);
+      final result = await ChatService.instance
+          .sendMessage(widget.threadId, text, replyTo: replyTo);
       if (result.scamWarning != null && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -111,10 +125,15 @@ class _ChatScreenState extends State<ChatScreen> {
     );
     if (file == null || !mounted) return;
 
-    setState(() => _busy = true);
+    final replyTo = _replyingTo;
+    setState(() {
+      _busy = true;
+      _replyingTo = null;
+    });
     try {
       final path = await ChatUploadService.instance.uploadChatImage(file);
-      await ChatService.instance.sendImage(widget.threadId, path);
+      await ChatService.instance
+          .sendImage(widget.threadId, path, replyTo: replyTo);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -149,10 +168,30 @@ class _ChatScreenState extends State<ChatScreen> {
           await ChatService.instance.getThreadDetail(widget.threadId);
       if (mounted) {
         setState(() => _thread = detail);
+        final isOnline = choice.method.isOnlineEscrow;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Đã gửi yêu cầu mua — chờ người bán xác nhận'),
+          SnackBar(
+            content: Text(
+              isOnline
+                  ? 'Đã tạo đơn — vào chi tiết đơn để thanh toán online (escrow)'
+                  : 'Đã gửi yêu cầu mua — chờ người bán xác nhận',
+            ),
             backgroundColor: AppColors.trustGreen,
+            action: isOnline && detail.orderId != null
+                ? SnackBarAction(
+                    label: 'Thanh toán',
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => OrderDetailScreen(
+                            orderId: detail.orderId!,
+                          ),
+                        ),
+                      );
+                    },
+                  )
+                : null,
           ),
         );
       }
@@ -252,8 +291,13 @@ class _ChatScreenState extends State<ChatScreen> {
                           thread: t,
                           busy: _busy,
                           onConfirmSale: _confirmSale,
+                          onReply: _startReply,
                         ),
                       ),
+          ),
+          if (_replyingTo != null) _ReplyPreviewBar(
+            message: _replyingTo!,
+            onCancel: _cancelReply,
           ),
           SafeArea(
             child: Padding(
@@ -268,6 +312,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   Expanded(
                     child: TextField(
                       controller: _controller,
+                      focusNode: _inputFocus,
                       decoration: InputDecoration(
                         hintText: 'Nhập tin nhắn...',
                         filled: true,
@@ -397,12 +442,14 @@ class _MessageBubble extends StatelessWidget {
     required this.thread,
     required this.busy,
     required this.onConfirmSale,
+    required this.onReply,
   });
 
   final ChatMessage message;
   final ChatThreadDetail? thread;
   final bool busy;
   final void Function(ChatMessage) onConfirmSale;
+  final void Function(ChatMessage) onReply;
 
   @override
   Widget build(BuildContext context) {
@@ -421,43 +468,55 @@ class _MessageBubble extends StatelessWidget {
       final url = ApiConfig.mediaUrl(rawUrl);
       return Align(
         alignment: message.mine ? Alignment.centerRight : Alignment.centerLeft,
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          constraints: BoxConstraints(
-            maxWidth: MediaQuery.sizeOf(context).width * 0.65,
-          ),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: message.mine
-                  ? AppColors.primary.withValues(alpha: 0.3)
-                  : AppColors.textMuted.withValues(alpha: 0.3),
-            ),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: url.isNotEmpty
-              ? Image.network(
-                  url,
-                  fit: BoxFit.cover,
-                  loadingBuilder: (_, child, progress) {
-                    if (progress == null) return child;
-                    return const SizedBox(
-                      height: 120,
-                      width: 120,
-                      child: Center(child: CircularProgressIndicator()),
-                    );
-                  },
-                  errorBuilder: (_, _, _) => const SizedBox(
-                    height: 100,
-                    width: 100,
-                    child: Icon(Icons.broken_image_outlined),
-                  ),
-                )
-              : const SizedBox(
-                  height: 100,
-                  width: 100,
-                  child: Icon(Icons.image_not_supported_outlined),
+        child: GestureDetector(
+          onLongPress: () => onReply(message),
+          child: Column(
+            crossAxisAlignment: message.mine
+                ? CrossAxisAlignment.end
+                : CrossAxisAlignment.start,
+            children: [
+              if (message.replyTo != null)
+                _ReplyQuote(reply: message.replyTo!, mine: message.mine),
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                constraints: BoxConstraints(
+                  maxWidth: MediaQuery.sizeOf(context).width * 0.65,
                 ),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: message.mine
+                        ? AppColors.primary.withValues(alpha: 0.3)
+                        : AppColors.textMuted.withValues(alpha: 0.3),
+                  ),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: url.isNotEmpty
+                    ? Image.network(
+                        url,
+                        fit: BoxFit.cover,
+                        loadingBuilder: (_, child, progress) {
+                          if (progress == null) return child;
+                          return const SizedBox(
+                            height: 120,
+                            width: 120,
+                            child: Center(child: CircularProgressIndicator()),
+                          );
+                        },
+                        errorBuilder: (_, _, _) => const SizedBox(
+                          height: 100,
+                          width: 100,
+                          child: Icon(Icons.broken_image_outlined),
+                        ),
+                      )
+                    : const SizedBox(
+                        height: 100,
+                        width: 100,
+                        child: Icon(Icons.image_not_supported_outlined),
+                      ),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -473,21 +532,163 @@ class _MessageBubble extends StatelessWidget {
 
     return Align(
       alignment: message.mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.sizeOf(context).width * 0.75,
-        ),
-        decoration: BoxDecoration(
-          color: message.mine ? AppColors.primary : AppColors.white,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Text(
-          message.body,
-          style: TextStyle(
-            color: message.mine ? AppColors.white : AppColors.textPrimary,
+      child: GestureDetector(
+        onLongPress: () => onReply(message),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.sizeOf(context).width * 0.75,
           ),
+          decoration: BoxDecoration(
+            color: message.mine ? AppColors.primary : AppColors.white,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (message.replyTo != null) ...[
+                _ReplyQuote(
+                  reply: message.replyTo!,
+                  mine: message.mine,
+                  inBubble: true,
+                ),
+                const SizedBox(height: 6),
+              ],
+              Text(
+                message.body,
+                style: TextStyle(
+                  color: message.mine ? AppColors.white : AppColors.textPrimary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Khối trích dẫn tin nhắn gốc, hiển thị bên trong/bên trên bong bóng.
+class _ReplyQuote extends StatelessWidget {
+  const _ReplyQuote({
+    required this.reply,
+    required this.mine,
+    this.inBubble = false,
+  });
+
+  final ReplyInfo reply;
+  final bool mine;
+  final bool inBubble;
+
+  @override
+  Widget build(BuildContext context) {
+    final onPrimary = mine && inBubble;
+    final barColor = onPrimary ? AppColors.white : AppColors.primary;
+    final nameColor = onPrimary
+        ? AppColors.white
+        : AppColors.primary;
+    final textColor = onPrimary
+        ? AppColors.white.withValues(alpha: 0.85)
+        : AppColors.textSecondary;
+    final bg = onPrimary
+        ? AppColors.white.withValues(alpha: 0.18)
+        : AppColors.primary.withValues(alpha: 0.08);
+
+    return Container(
+      margin: inBubble
+          ? EdgeInsets.zero
+          : const EdgeInsets.only(bottom: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.sizeOf(context).width * 0.6,
+      ),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border(left: BorderSide(color: barColor, width: 3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            reply.senderName.isEmpty ? 'Tin nhắn' : reply.senderName,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: nameColor,
+            ),
+          ),
+          Text(
+            reply.preview,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: textColor),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Thanh xem trước phía trên ô nhập khi đang soạn trả lời.
+class _ReplyPreviewBar extends StatelessWidget {
+  const _ReplyPreviewBar({required this.message, required this.onCancel});
+
+  final ChatMessage message;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppColors.white,
+      padding: const EdgeInsets.fromLTRB(12, 8, 4, 0),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppColors.primary.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: const Border(
+            left: BorderSide(color: AppColors.primary, width: 3),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.reply, size: 18, color: AppColors.primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Trả lời ${message.senderName.isEmpty ? '' : message.senderName}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  Text(
+                    message.replyPreview,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              onPressed: onCancel,
+              icon: const Icon(Icons.close, size: 18),
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
         ),
       ),
     );

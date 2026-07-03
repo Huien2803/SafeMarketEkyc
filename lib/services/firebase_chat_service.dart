@@ -204,7 +204,11 @@ class FirebaseChatService {
     );
   }
 
-  Future<String?> sendTextMessage(String threadId, String body) async {
+  Future<String?> sendTextMessage(
+    String threadId,
+    String body, {
+    Map<String, dynamic>? replyTo,
+  }) async {
     final user = AuthService.instance.currentUser;
     if (user == null) throw Exception('Cần đăng nhập');
 
@@ -216,6 +220,7 @@ class FirebaseChatService {
       'body': body,
       'messageType': 'TEXT',
       'meta': null,
+      'replyTo': replyTo,
       'createdAt': now,
     });
 
@@ -223,7 +228,11 @@ class FirebaseChatService {
     return null;
   }
 
-  Future<void> sendImageMessage(String threadId, String imageUrl) async {
+  Future<void> sendImageMessage(
+    String threadId,
+    String imageUrl, {
+    Map<String, dynamic>? replyTo,
+  }) async {
     final user = AuthService.instance.currentUser;
     if (user == null) throw Exception('Cần đăng nhập');
 
@@ -235,6 +244,7 @@ class FirebaseChatService {
       'body': '[Ảnh]',
       'messageType': 'IMAGE',
       'meta': {'imageUrl': imageUrl},
+      'replyTo': replyTo,
       'createdAt': now,
     });
 

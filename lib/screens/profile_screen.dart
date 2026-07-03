@@ -36,11 +36,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late Future<UserProfile> _profileFuture;
   late Future<List<SoldListing>> _soldFuture;
 
+  bool get _isGuest => !AuthService.instance.isLoggedIn;
+  bool _initializedForUser = false;
+
   @override
   void initState() {
     super.initState();
-    _profileFuture = _loadProfile();
-    _soldFuture = OrderService.instance.getSoldProducts();
+    _initializedForUser = !_isGuest;
+    if (_isGuest) {
+      _profileFuture = Future<UserProfile>.error(
+        AuthException('Chưa đăng nhập', statusCode: 401),
+      );
+      _soldFuture = Future<List<SoldListing>>.value(const []);
+    } else {
+      _profileFuture = _loadProfile();
+      _soldFuture = OrderService.instance.getSoldProducts();
+    }
+  }
+
+  Future<void> _goLogin() async {
+    final nav = Navigator.of(context);
+    await nav.push(
+      MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
+    );
+    if (mounted && !_isGuest) _refresh();
   }
 
   Future<UserProfile> _loadProfile() {
@@ -105,6 +124,69 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isGuest) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 96,
+                    height: 96,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.person_outline,
+                        size: 48, color: AppColors.primary),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Bạn đang xem với tư cách khách',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Đăng nhập để quản lý hồ sơ, đăng bán, nhắn tin và '
+                    'theo dõi người bán uy tín.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 14,
+                      height: 1.5,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _goLogin,
+                      icon: const Icon(Icons.login),
+                      label: const Text('Đăng nhập / Đăng ký'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    if (!_initializedForUser) {
+      _initializedForUser = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _refresh();
+      });
+    }
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
