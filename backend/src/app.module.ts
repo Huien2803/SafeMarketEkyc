@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -28,6 +30,11 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { PaymentsModule } from './payments/payments.module';
 import { UserFollow } from './entities/user-follow.entity';
 import { Notification } from './entities/notification.entity';
+import { Wallet } from './entities/wallet.entity';
+import { WalletTransaction } from './entities/wallet-transaction.entity';
+import { Withdrawal } from './entities/withdrawal.entity';
+import { RefreshToken } from './entities/refresh-token.entity';
+import { WalletModule } from './wallet/wallet.module';
 
 @Module({
   imports: [
@@ -35,6 +42,13 @@ import { Notification } from './entities/notification.entity';
       isGlobal: true,
       envFilePath: '.env',
     }),
+    ThrottlerModule.forRoot([
+      {
+        name: 'default',
+        ttl: 60_000,
+        limit: 100,
+      },
+    ]),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
@@ -67,6 +81,10 @@ import { Notification } from './entities/notification.entity';
             ChatMessage,
             UserFollow,
             Notification,
+            Wallet,
+            WalletTransaction,
+            Withdrawal,
+            RefreshToken,
           ],
           synchronize: false,
           logging: ['error', 'warn'],
@@ -94,6 +112,13 @@ import { Notification } from './entities/notification.entity';
     FollowsModule,
     NotificationsModule,
     PaymentsModule,
+    WalletModule,
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
   ],
 })
 export class AppModule {}

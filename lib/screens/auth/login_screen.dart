@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
 import 'package:safemarket_app/screens/admin_dashboard.dart';
+import 'package:safemarket_app/screens/auth/forgot_password_screen.dart';
 import 'package:safemarket_app/screens/auth/register_screen.dart';
 import 'package:safemarket_app/screens/marketplace_home.dart';
 import 'package:safemarket_app/services/auth_service.dart';
@@ -157,7 +158,25 @@ class _LoginScreenState extends State<LoginScreen> {
                       return null;
                     },
                   ),
-                  const SizedBox(height: 24),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: _loading
+                          ? null
+                          : () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => ForgotPasswordScreen(
+                                    initialEmail:
+                                        _identifierCtrl.text.contains('@')
+                                            ? _identifierCtrl.text.trim()
+                                            : null,
+                                  ),
+                                ),
+                              ),
+                      child: const Text('Quên mật khẩu?'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   SizedBox(
                     height: 52,
                     child: ElevatedButton(

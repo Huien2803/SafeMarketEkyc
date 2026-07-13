@@ -23,6 +23,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   List<Map<String, dynamic>> _reports = [];
   List<Map<String, dynamic>> _pendingEkyc = [];
   List<Map<String, dynamic>> _lockedUsers = [];
+  List<Map<String, dynamic>> _disputes = [];
+  List<Map<String, dynamic>> _withdrawals = [];
   List<AdminRankRow> _ranking = [];
   bool _rankingDesc = true;
   bool _rankingLoading = false;
@@ -36,6 +38,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     _MenuItem('Xếp hạng tín nhiệm', Icons.leaderboard_outlined),
     _MenuItem('Phê duyệt eKYC', Icons.verified_user_outlined),
     _MenuItem('Báo cáo vi phạm', Icons.report_outlined),
+    _MenuItem('Khiếu nại đơn', Icons.gavel_outlined),
+    _MenuItem('Duyệt rút tiền', Icons.account_balance_wallet_outlined),
     _MenuItem('Danh sách đen', Icons.block_outlined),
     _MenuItem('Báo cáo hệ thống', Icons.analytics_outlined),
   ];
@@ -79,6 +83,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         AdminService.instance.getPendingEkyc(),
         AdminService.instance.getLockedUsers(),
         AdminService.instance.getUserRanking(descending: _rankingDesc),
+        AdminService.instance.getDisputes(),
+        AdminService.instance.getWithdrawals(),
       ]);
       if (!mounted) return;
       setState(() {
@@ -88,6 +94,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _pendingEkyc = results[3] as List<Map<String, dynamic>>;
         _lockedUsers = results[4] as List<Map<String, dynamic>>;
         _ranking = results[5] as List<AdminRankRow>;
+        _disputes = results[6] as List<Map<String, dynamic>>;
+        _withdrawals = results[7] as List<Map<String, dynamic>>;
         _loading = false;
       });
     } catch (e) {
@@ -101,6 +109,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         final locked = await AdminService.instance.getLockedUsers();
         final ranking =
             await AdminService.instance.getUserRanking(descending: _rankingDesc);
+        final disputes = await AdminService.instance.getDisputes();
+        final withdrawals = await AdminService.instance.getWithdrawals();
         if (!mounted) return;
         setState(() {
           _users = users;
@@ -108,6 +118,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           _pendingEkyc = pending;
           _lockedUsers = locked;
           _ranking = ranking;
+          _disputes = disputes;
+          _withdrawals = withdrawals;
           _loadError = '$e';
         });
       } catch (_) {
@@ -287,7 +299,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         return _UsersTableCard(
           users: _filteredUsers,
           loading: _loading,
+          onWarn: _warnUser,
           onLock: _lockUser,
+          onSuspend: _suspendUser,
           onUnlock: _unlockUser,
           onBan: _banUser,
           onPunish: _punishUser,
@@ -317,12 +331,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           onPunishUser: _punishUserById,
         );
       case 5:
+        return _DisputesManageCard(
+          disputes: _disputes,
+          loading: _loading,
+          onResolve: _resolveDispute,
+        );
+      case 6:
+        return _WithdrawalsManageCard(
+          withdrawals: _withdrawals,
+          loading: _loading,
+          onApprove: _approveWithdrawal,
+          onReject: _rejectWithdrawal,
+        );
+      case 7:
         return _LockedUsersCard(
           users: _lockedUsers,
           loading: _loading,
           onUnlock: _unlockUser,
         );
-      case 6:
+      case 8:
         return _SystemReportCard(stats: _stats);
       default:
         return Column(
@@ -358,7 +385,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             _UsersTableCard(
               users: _filteredUsers,
               loading: _loading,
+              onWarn: _warnUser,
               onLock: _lockUser,
+              onSuspend: _suspendUser,
               onUnlock: _unlockUser,
               onBan: _banUser,
               onPunish: _punishUser,
@@ -519,14 +548,131 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
+  Future<void> _warnUser(AdminUserRow user) async {
+    final reason = await _promptText(
+      title: 'Cảnh cáo người dùng',
+      hint: 'Nội dung cảnh cáo...',
+      initial: 'Vi phạm quy định cộng đồng',
+    );
+    if (reason == null || reason.isEmpty || !mounted) return;
+    try {
+      await AdminService.instance.warnUser(user.userId, reason: reason);
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Đã gửi cảnh cáo tới ${user.displayName ?? user.email}'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
+  Future<void> _suspendUser(AdminUserRow user) async {
+    final result = await _promptSuspend(user);
+    if (result == null || !mounted) return;
+    try {
+      await AdminService.instance.suspendUser(
+        user.userId,
+        days: result.days,
+        reason: result.reason,
+      );
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Đã đình chỉ ${user.displayName ?? user.email} trong ${result.days} ngày',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
+  Future<_SuspendResult?> _promptSuspend(AdminUserRow user) async {
+    final reasonCtrl = TextEditingController(text: 'Vi phạm quy định');
+    int days = 7;
+    const options = [3, 7, 14, 30];
+    final result = await showDialog<_SuspendResult>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('Đình chỉ tạm thời'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Tài khoản ${user.displayName ?? user.email} sẽ bị khóa và tự mở lại khi hết hạn.',
+                style: const TextStyle(fontSize: 13, height: 1.4),
+              ),
+              const SizedBox(height: 14),
+              const Text('Thời hạn', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: options
+                    .map(
+                      (d) => ChoiceChip(
+                        label: Text('$d ngày'),
+                        selected: days == d,
+                        onSelected: (_) => setLocal(() => days = d),
+                      ),
+                    )
+                    .toList(),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: reasonCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Lý do đình chỉ',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 2,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Huỷ'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppColors.warning),
+              onPressed: () {
+                final reason = reasonCtrl.text.trim();
+                if (reason.isEmpty) return;
+                Navigator.pop(ctx, _SuspendResult(days: days, reason: reason));
+              },
+              child: const Text('Đình chỉ'),
+            ),
+          ],
+        ),
+      ),
+    );
+    reasonCtrl.dispose();
+    return result;
+  }
+
   Future<void> _deleteUser(AdminUserRow user) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Xóa tài khoản'),
         content: Text(
-          'Xóa vĩnh viễn ${user.displayName ?? user.email}?\n'
-          'Chỉ xóa được khi user chưa có sản phẩm/đơn hàng.',
+          'Xóa tài khoản ${user.displayName ?? user.email}?\n\n'
+          'Nếu người dùng đã có sản phẩm hoặc đơn hàng, hệ thống sẽ '
+          'ẩn danh tài khoản và ẩn toàn bộ sản phẩm (giữ lại lịch sử giao dịch '
+          'để đối soát). Nếu chưa phát sinh dữ liệu, tài khoản sẽ bị xóa hoàn toàn.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Huỷ')),
@@ -540,11 +686,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
     if (ok != true || !mounted) return;
     try {
-      await AdminService.instance.deleteUser(user.userId);
+      final mode = await AdminService.instance.deleteUser(user.userId);
       await _load();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Đã xóa tài khoản')),
+          SnackBar(
+            content: Text(
+              mode == 'soft'
+                  ? 'Đã ẩn danh & vô hiệu hóa tài khoản (giữ lịch sử giao dịch)'
+                  : 'Đã xóa tài khoản hoàn toàn',
+            ),
+          ),
         );
       }
     } catch (e) {
@@ -558,6 +710,78 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     try {
       await AdminService.instance.unlockUser(userId);
       await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
+  Future<void> _resolveDispute(
+    int orderId,
+    String decision, {
+    String? note,
+    int penaltyPoints = 50,
+    bool skipPenalty = false,
+  }) async {
+    try {
+      await AdminService.instance.resolveDispute(
+        orderId,
+        decision: decision,
+        note: note,
+        penaltyPoints: penaltyPoints,
+        skipPenalty: skipPenalty,
+      );
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              decision == 'REFUND_BUYER'
+                  ? 'Đã hoàn tiền người mua — đơn #$orderId'
+                  : 'Đã giải ngân người bán — đơn #$orderId',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
+  Future<void> _approveWithdrawal(int id) async {
+    try {
+      await AdminService.instance.approveWithdrawal(id);
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Đã duyệt lệnh rút tiền')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
+  Future<void> _rejectWithdrawal(int id) async {
+    final note = await _promptText(
+      title: 'Từ chối rút tiền',
+      hint: 'Lý do từ chối...',
+      initial: 'Thông tin ngân hàng không hợp lệ',
+    );
+    if (note == null || note.isEmpty || !mounted) return;
+    try {
+      await AdminService.instance.rejectWithdrawal(id, note: note);
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Đã từ chối — tiền hoàn về ví')),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
@@ -906,8 +1130,12 @@ class _PageTitleRow extends StatelessWidget {
       case 4:
         return 'Báo cáo vi phạm';
       case 5:
-        return 'Danh sách đen';
+        return 'Khiếu nại đơn hàng';
       case 6:
+        return 'Duyệt rút tiền';
+      case 7:
+        return 'Danh sách đen';
+      case 8:
         return 'Báo cáo hệ thống';
       default:
         return 'Tổng quan hệ thống';
@@ -1396,7 +1624,9 @@ class _UsersTableCard extends StatelessWidget {
   const _UsersTableCard({
     required this.users,
     this.loading = false,
+    this.onWarn,
     this.onLock,
+    this.onSuspend,
     this.onUnlock,
     this.onBan,
     this.onPunish,
@@ -1405,7 +1635,9 @@ class _UsersTableCard extends StatelessWidget {
 
   final List<AdminUserRow> users;
   final bool loading;
+  final void Function(AdminUserRow user)? onWarn;
   final void Function(AdminUserRow user)? onLock;
+  final void Function(AdminUserRow user)? onSuspend;
   final void Function(int userId)? onUnlock;
   final void Function(AdminUserRow user)? onBan;
   final void Function(AdminUserRow user)? onPunish;
@@ -1461,7 +1693,10 @@ class _UsersTableCard extends StatelessWidget {
                     (u) => DataRow(
                       cells: [
                         DataCell(_UserCellApi(user: u)),
-                        DataCell(_AccountStatusBadge(status: u.accountStatus)),
+                        DataCell(_AccountStatusBadge(
+                          status: u.accountStatus,
+                          lockedUntil: u.lockedUntil,
+                        )),
                         DataCell(_EkycBadge(
                             verified: u.kycStatus == 'Verified')),
                         DataCell(
@@ -1474,7 +1709,9 @@ class _UsersTableCard extends StatelessWidget {
                         DataCell(
                           _UserActionsMenu(
                             user: u,
+                            onWarn: onWarn,
                             onLock: onLock,
+                            onSuspend: onSuspend,
                             onUnlock: onUnlock,
                             onBan: onBan,
                             onPunish: onPunish,
@@ -1534,39 +1771,73 @@ class _UserCellApi extends StatelessWidget {
   }
 }
 
+class _SuspendResult {
+  const _SuspendResult({required this.days, required this.reason});
+  final int days;
+  final String reason;
+}
+
 class _AccountStatusBadge extends StatelessWidget {
-  const _AccountStatusBadge({required this.status});
+  const _AccountStatusBadge({required this.status, this.lockedUntil});
 
   final String status;
+  final DateTime? lockedUntil;
 
   @override
   Widget build(BuildContext context) {
     final isActive = status == 'Active';
     final isBanned = status == 'Banned';
-    final color = isActive
-        ? AppColors.trustGreen
-        : isBanned
-            ? AppColors.danger
-            : AppColors.warning;
-    final label = isActive
-        ? 'HOẠT ĐỘNG'
-        : isBanned
-            ? 'BỊ CẤM'
-            : 'BỊ KHÓA';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
-          color: color,
+    final isDeleted = status == 'Deleted';
+    final isSuspended = status == 'Locked' && lockedUntil != null;
+
+    final Color color;
+    final String label;
+    if (isActive) {
+      color = AppColors.trustGreen;
+      label = 'HOẠT ĐỘNG';
+    } else if (isBanned) {
+      color = AppColors.danger;
+      label = 'BỊ CẤM';
+    } else if (isDeleted) {
+      color = AppColors.textMuted;
+      label = 'ĐÃ XÓA';
+    } else if (isSuspended) {
+      color = AppColors.warning;
+      label = 'ĐÌNH CHỈ';
+    } else {
+      color = AppColors.warning;
+      label = 'BỊ KHÓA';
+    }
+
+    final until = lockedUntil;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
         ),
-      ),
+        if (isSuspended && until != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              'đến ${until.day.toString().padLeft(2, '0')}/${until.month.toString().padLeft(2, '0')}/${until.year}',
+              style: const TextStyle(fontSize: 9, color: AppColors.textMuted),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -1574,7 +1845,9 @@ class _AccountStatusBadge extends StatelessWidget {
 class _UserActionsMenu extends StatelessWidget {
   const _UserActionsMenu({
     required this.user,
+    this.onWarn,
     this.onLock,
+    this.onSuspend,
     this.onUnlock,
     this.onBan,
     this.onPunish,
@@ -1582,7 +1855,9 @@ class _UserActionsMenu extends StatelessWidget {
   });
 
   final AdminUserRow user;
+  final void Function(AdminUserRow user)? onWarn;
   final void Function(AdminUserRow user)? onLock;
+  final void Function(AdminUserRow user)? onSuspend;
   final void Function(int userId)? onUnlock;
   final void Function(AdminUserRow user)? onBan;
   final void Function(AdminUserRow user)? onPunish;
@@ -1591,13 +1866,27 @@ class _UserActionsMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isActive = user.accountStatus == 'Active';
+    final isDeleted = user.accountStatus == 'Deleted';
+
+    // Tài khoản đã xóa mềm: không còn thao tác quản lý nào.
+    if (isDeleted) {
+      return const SizedBox(
+        width: 40,
+        child: Text('—', textAlign: TextAlign.center),
+      );
+    }
+
     return PopupMenuButton<String>(
       tooltip: 'Quản lý người dùng',
       icon: const Icon(Icons.more_vert, size: 20),
       onSelected: (action) {
         switch (action) {
+          case 'warn':
+            onWarn?.call(user);
           case 'lock':
             onLock?.call(user);
+          case 'suspend':
+            onSuspend?.call(user);
           case 'unlock':
             onUnlock?.call(user.userId);
           case 'ban':
@@ -1609,12 +1898,39 @@ class _UserActionsMenu extends StatelessWidget {
         }
       },
       itemBuilder: (ctx) => [
+        if (isActive && onWarn != null)
+          const PopupMenuItem(
+            value: 'warn',
+            child: ListTile(
+              leading: Icon(Icons.campaign_outlined, size: 20, color: AppColors.warning),
+              title: Text('Cảnh cáo'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        if (isActive && onPunish != null)
+          const PopupMenuItem(
+            value: 'punish',
+            child: ListTile(
+              leading: Icon(Icons.remove_circle_outline, size: 20),
+              title: Text('Trừ điểm tín nhiệm'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        if (isActive && onSuspend != null)
+          const PopupMenuItem(
+            value: 'suspend',
+            child: ListTile(
+              leading: Icon(Icons.timer_outlined, size: 20, color: AppColors.warning),
+              title: Text('Đình chỉ tạm thời'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
         if (isActive && onLock != null)
           const PopupMenuItem(
             value: 'lock',
             child: ListTile(
               leading: Icon(Icons.block, size: 20),
-              title: Text('Khóa tài khoản'),
+              title: Text('Khóa vô thời hạn'),
               contentPadding: EdgeInsets.zero,
             ),
           ),
@@ -1622,7 +1938,7 @@ class _UserActionsMenu extends StatelessWidget {
           const PopupMenuItem(
             value: 'unlock',
             child: ListTile(
-              leading: Icon(Icons.lock_open, size: 20),
+              leading: Icon(Icons.lock_open, size: 20, color: AppColors.trustGreen),
               title: Text('Mở khóa'),
               contentPadding: EdgeInsets.zero,
             ),
@@ -1633,15 +1949,6 @@ class _UserActionsMenu extends StatelessWidget {
             child: ListTile(
               leading: Icon(Icons.gavel, size: 20, color: AppColors.danger),
               title: Text('Cấm vĩnh viễn'),
-              contentPadding: EdgeInsets.zero,
-            ),
-          ),
-        if (onPunish != null)
-          const PopupMenuItem(
-            value: 'punish',
-            child: ListTile(
-              leading: Icon(Icons.remove_circle_outline, size: 20),
-              title: Text('Trừ điểm tín nhiệm'),
               contentPadding: EdgeInsets.zero,
             ),
           ),
@@ -1927,6 +2234,209 @@ class _ReportsManageCard extends StatelessWidget {
   }
 }
 
+class _DisputesManageCard extends StatelessWidget {
+  const _DisputesManageCard({
+    required this.disputes,
+    required this.loading,
+    required this.onResolve,
+  });
+
+  final List<Map<String, dynamic>> disputes;
+  final bool loading;
+  final Future<void> Function(
+    int orderId,
+    String decision, {
+    String? note,
+    int penaltyPoints,
+    bool skipPenalty,
+  }) onResolve;
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading && disputes.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: AppDecorations.card(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Khiếu nại đơn hàng chờ xử lý',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Hoàn tiền người mua = hủy đơn + hoàn escrow + trừ điểm người bán.\n'
+            'Giải ngân người bán = hoàn tất đơn + cộng ví + trừ điểm người mua.',
+            style: TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.4),
+          ),
+          const SizedBox(height: 16),
+          if (disputes.isEmpty)
+            const Text('Không có khiếu nại đang mở')
+          else
+            ...disputes.map((d) {
+              final orderId = (d['orderId'] as num).toInt();
+              final type = d['disputeType'] as String? ?? '';
+              final typeLabel = switch (type) {
+                'NO_RECEIVE' => 'Không nhận hàng',
+                'WRONG_DELIVERY' => 'Giao sai',
+                _ => type.isEmpty ? 'Khiếu nại' : type,
+              };
+              return Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Đơn #$orderId · $typeLabel',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        d['productTitle'] as String? ?? '',
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                      Text(
+                        'Mua: ${d['buyerName']}  ·  Bán: ${d['sellerName']}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.textMuted,
+                        ),
+                      ),
+                      if ((d['disputeNote'] as String?)?.isNotEmpty == true)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(
+                            'Ghi chú: ${d['disputeNote']}',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      Text(
+                        'Escrow: ${d['escrowStatus'] ?? '—'} · '
+                        '${d['escrowAmount'] ?? 0}đ',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          FilledButton.tonal(
+                            onPressed: () => onResolve(
+                              orderId,
+                              'REFUND_BUYER',
+                              note: 'Admin hoàn tiền người mua',
+                            ),
+                            child: const Text('Hoàn tiền người mua'),
+                          ),
+                          FilledButton(
+                            onPressed: () => onResolve(
+                              orderId,
+                              'RELEASE_SELLER',
+                              note: 'Admin giải ngân người bán',
+                            ),
+                            child: const Text('Giải ngân người bán'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+}
+
+class _WithdrawalsManageCard extends StatelessWidget {
+  const _WithdrawalsManageCard({
+    required this.withdrawals,
+    required this.loading,
+    required this.onApprove,
+    required this.onReject,
+  });
+
+  final List<Map<String, dynamic>> withdrawals;
+  final bool loading;
+  final void Function(int id) onApprove;
+  final void Function(int id) onReject;
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading && withdrawals.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: AppDecorations.card(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Yêu cầu rút tiền chờ duyệt',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Duyệt = đã chuyển khoản. Từ chối = hoàn tiền về ví người bán.',
+            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+          ),
+          const SizedBox(height: 16),
+          if (withdrawals.isEmpty)
+            const Text('Không có lệnh rút đang chờ')
+          else
+            ...withdrawals.map((w) {
+              final id = (w['withdrawalId'] as num).toInt();
+              return Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                child: ListTile(
+                  title: Text(
+                    '${w['displayName'] ?? ''} · ${w['amountFormatted'] ?? ''}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: Text(
+                    '${w['bankName']} · ${w['bankAccount']}\n'
+                    'Chủ TK: ${w['accountHolder']}',
+                  ),
+                  isThreeLine: true,
+                  trailing: Wrap(
+                    spacing: 4,
+                    children: [
+                      IconButton(
+                        tooltip: 'Duyệt',
+                        icon: const Icon(Icons.check_circle_outline,
+                            color: AppColors.trustGreen),
+                        onPressed: () => onApprove(id),
+                      ),
+                      IconButton(
+                        tooltip: 'Từ chối',
+                        icon: const Icon(Icons.cancel_outlined,
+                            color: AppColors.danger),
+                        onPressed: () => onReject(id),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+}
+
 class _LockedUsersCard extends StatelessWidget {
   const _LockedUsersCard({
     required this.users,
@@ -1957,12 +2467,21 @@ class _LockedUsersCard extends StatelessWidget {
           else
             ...users.map((u) {
               final id = (u['userId'] as num).toInt();
+              final status = u['accountStatus'] as String? ?? 'Locked';
+              final until = u['lockedUntil'] != null
+                  ? DateTime.tryParse(u['lockedUntil'] as String)
+                  : null;
+              final statusLabel = status == 'Banned'
+                  ? 'Bị cấm'
+                  : until != null
+                      ? 'Đình chỉ đến ${until.day.toString().padLeft(2, '0')}/${until.month.toString().padLeft(2, '0')}/${until.year}'
+                      : 'Bị khóa';
               return ListTile(
                 title: Text(u['displayName'] as String? ?? ''),
-                subtitle: Text(
-                    '${u['accountStatus']} • ${u['lockReason'] ?? ''}'),
+                subtitle: Text('$statusLabel • ${u['lockReason'] ?? ''}'),
                 trailing: IconButton(
                   icon: const Icon(Icons.lock_open),
+                  tooltip: 'Mở khóa',
                   onPressed: () => onUnlock(id),
                 ),
               );

@@ -12,6 +12,11 @@ import { Report } from '../entities/report.entity';
 import { EkycProfile } from '../entities/ekyc-profile.entity';
 import { Order } from '../entities/order.entity';
 import { Product } from '../entities/product.entity';
+import { Payment } from '../entities/payment.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+import { PaymentsService } from '../payments/payments.service';
+import { WalletService } from '../wallet/wallet.service';
+import { ReputationService } from '../reputation/reputation.service';
 
 @Injectable()
 export class AdminService {
@@ -23,6 +28,11 @@ export class AdminService {
     @InjectRepository(EkycProfile) private readonly ekycRepo: Repository<EkycProfile>,
     @InjectRepository(Order) private readonly orderRepo: Repository<Order>,
     @InjectRepository(Product) private readonly productRepo: Repository<Product>,
+    @InjectRepository(Payment) private readonly paymentRepo: Repository<Payment>,
+    private readonly notificationsService: NotificationsService,
+    private readonly paymentsService: PaymentsService,
+    private readonly walletService: WalletService,
+    private readonly reputationService: ReputationService,
   ) {}
 
   async getStats() {
@@ -123,6 +133,7 @@ export class AdminService {
         trustScore: score?.currentPoint ?? 500,
         rankLevel: score?.rankLevel ?? 'Bronze',
         orders,
+        lockedUntil: u.lockedUntil ? u.lockedUntil.toISOString() : null,
       });
     }
     return rows;
@@ -246,6 +257,7 @@ export class AdminService {
       displayName: u.displayName ?? u.email,
       accountStatus: u.accountStatus,
       lockReason: u.lockReason ?? '',
+      lockedUntil: u.lockedUntil ? u.lockedUntil.toISOString() : null,
     }));
   }
 
@@ -286,12 +298,69 @@ export class AdminService {
     }
   }
 
+  /** Cảnh cáo người dùng: gửi thông báo + ghi nhật ký, không phạt điểm. */
+  async warnUser(userId: number, reason: string) {
+    const user = await this.requireNonAdminUser(userId);
+    await this.pointLogRepo.save({
+      userId,
+      delta: 0,
+      reasonCode: 'ADMIN_WARNING',
+      note: reason,
+    });
+    await this.notify(userId, {
+      title: 'Cảnh cáo từ quản trị viên',
+      body: `Bạn nhận được một cảnh cáo: ${reason}. Vui lòng tuân thủ quy định để tránh bị xử lý nặng hơn.`,
+      payload: { action: 'WARN', reason },
+    });
+    return { userId: Number(user.userId), action: 'WARN' };
+  }
+
   async lockUser(userId: number, reason: string) {
     const user = await this.requireNonAdminUser(userId);
     user.accountStatus = 'Locked';
     user.lockReason = reason;
     user.lockedAt = new Date();
+    user.lockedUntil = null;
     await this.userRepo.save(user);
+    await this.notify(userId, {
+      title: 'Tài khoản bị khóa',
+      body: `Tài khoản của bạn đã bị khóa vô thời hạn. Lý do: ${reason}.`,
+      payload: { action: 'LOCK', reason },
+    });
+  }
+
+  /** Đình chỉ tạm thời: khóa có thời hạn, hệ thống tự mở khi hết hạn. */
+  async suspendUser(userId: number, days: number, reason: string) {
+    const user = await this.requireNonAdminUser(userId);
+    if (!Number.isFinite(days) || days < 1 || days > 365) {
+      throw new BadRequestException('Số ngày đình chỉ phải từ 1 đến 365');
+    }
+    const until = new Date();
+    until.setDate(until.getDate() + Math.floor(days));
+
+    user.accountStatus = 'Locked';
+    user.lockReason = reason;
+    user.lockedAt = new Date();
+    user.lockedUntil = until;
+    await this.userRepo.save(user);
+
+    await this.notify(userId, {
+      title: 'Tài khoản bị đình chỉ tạm thời',
+      body: `Tài khoản của bạn bị đình chỉ ${Math.floor(days)} ngày (đến ${this.formatVn(until)}). Lý do: ${reason}.`,
+      payload: {
+        action: 'SUSPEND',
+        reason,
+        days: Math.floor(days),
+        lockedUntil: until.toISOString(),
+      },
+    });
+
+    return {
+      userId: Number(user.userId),
+      action: 'SUSPEND',
+      lockedUntil: until.toISOString(),
+      days: Math.floor(days),
+    };
   }
 
   async banUser(userId: number, reason: string) {
@@ -299,7 +368,13 @@ export class AdminService {
     user.accountStatus = 'Banned';
     user.lockReason = reason;
     user.lockedAt = new Date();
+    user.lockedUntil = null;
     await this.userRepo.save(user);
+    await this.notify(userId, {
+      title: 'Tài khoản bị cấm vĩnh viễn',
+      body: `Tài khoản của bạn đã bị cấm vĩnh viễn. Lý do: ${reason}.`,
+      payload: { action: 'BAN', reason },
+    });
   }
 
   async punishUser(userId: number, points: number, reason: string) {
@@ -328,6 +403,18 @@ export class AdminService {
       note: reason,
     });
 
+    await this.notify(userId, {
+      title: 'Bị trừ điểm tín nhiệm',
+      body: `Bạn bị trừ ${points} điểm tín nhiệm (còn ${next} điểm, hạng ${score.rankLevel}). Lý do: ${reason}.`,
+      payload: {
+        action: 'PUNISH',
+        reason,
+        deducted: points,
+        trustScore: next,
+        rankLevel: score.rankLevel,
+      },
+    });
+
     return {
       userId: Number(user.userId),
       trustScore: next,
@@ -336,6 +423,12 @@ export class AdminService {
     };
   }
 
+  /**
+   * Xóa tài khoản.
+   *  - Chưa phát sinh dữ liệu (không sản phẩm/đơn) -> xóa cứng hoàn toàn.
+   *  - Đã có sản phẩm/đơn -> xóa mềm: ẩn danh thông tin, ẩn toàn bộ sản phẩm,
+   *    giữ lại lịch sử giao dịch cho mục đích đối soát/pháp lý.
+   */
   async deleteUser(userId: number) {
     const user = await this.requireNonAdminUser(userId);
 
@@ -345,25 +438,85 @@ export class AdminService {
     const orderCount = await this.orderRepo.count({
       where: { buyerId: userId },
     });
-    if (productCount > 0 || orderCount > 0) {
-      throw new BadRequestException(
-        'Không thể xóa: người dùng còn sản phẩm hoặc đơn hàng. Hãy khóa/cấm thay thế.',
-      );
+
+    if (productCount === 0 && orderCount === 0) {
+      await this.ekycRepo.delete({ userId });
+      await this.scoreRepo.delete({ userId });
+      await this.pointLogRepo.delete({ userId });
+      await this.userRepo.delete({ userId });
+      return { mode: 'hard' as const, userId: Number(userId) };
     }
 
+    // Xóa mềm: ẩn danh + vô hiệu hóa đăng nhập, giữ lịch sử.
+    await this.productRepo
+      .createQueryBuilder()
+      .update(Product)
+      .set({ status: 'Hidden' })
+      .where('seller_id = :userId', { userId })
+      .execute();
+
+    const anonId = `deleted_${userId}`;
+    user.accountStatus = 'Deleted';
+    user.displayName = 'Tài khoản đã xóa';
+    user.avatarUrl = null;
+    user.location = null;
+    user.email = `${anonId}@deleted.local`;
+    user.phoneNumber = `deleted-${userId}`.slice(0, 15);
+    user.passwordHash = 'ACCOUNT_DELETED';
+    user.lockReason = 'Tài khoản đã bị quản trị viên xóa';
+    user.lockedAt = new Date();
+    user.lockedUntil = null;
+    user.kycStatus = 'Unverified';
+    await this.userRepo.save(user);
     await this.ekycRepo.delete({ userId });
-    await this.scoreRepo.delete({ userId });
-    await this.pointLogRepo.delete({ userId });
-    await this.userRepo.delete({ userId });
+
+    return {
+      mode: 'soft' as const,
+      userId: Number(userId),
+      hiddenProducts: productCount,
+    };
   }
 
   async unlockUser(userId: number) {
     const user = await this.userRepo.findOne({ where: { userId } });
     if (!user) throw new NotFoundException('User không tồn tại');
+    if (user.accountStatus === 'Deleted') {
+      throw new BadRequestException(
+        'Tài khoản đã xóa, không thể khôi phục từ đây',
+      );
+    }
     user.accountStatus = 'Active';
     user.lockReason = null;
     user.lockedAt = null;
+    user.lockedUntil = null;
     await this.userRepo.save(user);
+    await this.notify(userId, {
+      title: 'Tài khoản đã được mở khóa',
+      body: 'Quản trị viên đã mở khóa tài khoản của bạn. Bạn có thể tiếp tục sử dụng bình thường.',
+      payload: { action: 'UNLOCK' },
+    });
+  }
+
+  /** Gửi thông báo kỷ luật, không để lỗi thông báo làm hỏng thao tác chính. */
+  private async notify(
+    userId: number,
+    input: { title: string; body: string; payload?: Record<string, unknown> },
+  ): Promise<void> {
+    try {
+      await this.notificationsService.notifyAdminAction(userId, input);
+    } catch {
+      // Bỏ qua: thông báo là phụ, không chặn hành động quản trị.
+    }
+  }
+
+  private formatVn(d: Date): string {
+    return d.toLocaleString('vi-VN', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   }
 
   async resolveReport(reportId: number, status: string) {
@@ -372,6 +525,250 @@ export class AdminService {
     report.status = status;
     report.resolvedAt = new Date();
     await this.reportRepo.save(report);
+  }
+
+  /** Danh sách đơn đang khiếu nại chờ admin xử lý. */
+  async getDisputes() {
+    const rows = await this.orderRepo.find({
+      where: { orderStatus: 'Disputed' },
+      relations: ['buyer', 'product', 'product.seller'],
+      order: { createdAt: 'DESC' },
+      take: 50,
+    });
+    const result: Record<string, unknown>[] = [];
+    for (const o of rows) {
+      const product = o.product;
+      const seller = product?.seller;
+      const payment = await this.paymentRepo.findOne({
+        where: { orderId: o.orderId },
+      });
+      result.push({
+        orderId: Number(o.orderId),
+        orderStatus: o.orderStatus,
+        disputeType: o.disputeType,
+        disputeNote: o.disputeNote,
+        paymentMethod: o.paymentMethod,
+        deliveryMethod: o.deliveryMethod,
+        buyerId: Number(o.buyerId),
+        buyerName: o.buyer?.displayName ?? o.buyer?.email ?? '',
+        sellerId: seller ? Number(seller.userId) : null,
+        sellerName: seller?.displayName ?? seller?.email ?? '',
+        productId: product ? Number(product.productId) : null,
+        productTitle: product?.title ?? '',
+        productPrice: product ? Number(product.price) : 0,
+        escrowStatus: payment?.escrowStatus ?? null,
+        escrowAmount: payment ? Number(payment.amount) : 0,
+        createdAt: o.createdAt?.toISOString?.() ?? null,
+      });
+    }
+    return result;
+  }
+
+  /**
+   * Xử lý khiếu nại:
+   *  - REFUND_BUYER: hoàn escrow cho người mua, hủy đơn, mở lại sản phẩm, trừ điểm người bán (mặc định).
+   *  - RELEASE_SELLER: giải ngân cho người bán, hoàn tất đơn, trừ điểm người mua (mặc định).
+   */
+  async resolveDispute(
+    orderId: number,
+    decision: 'REFUND_BUYER' | 'RELEASE_SELLER',
+    opts?: {
+      note?: string;
+      penaltyPoints?: number;
+      skipPenalty?: boolean;
+    },
+  ) {
+    if (decision !== 'REFUND_BUYER' && decision !== 'RELEASE_SELLER') {
+      throw new BadRequestException(
+        'decision phải là REFUND_BUYER hoặc RELEASE_SELLER',
+      );
+    }
+    const order = await this.orderRepo.findOne({
+      where: { orderId },
+      relations: ['product'],
+    });
+    if (!order) throw new NotFoundException('Đơn hàng không tồn tại');
+    if (order.orderStatus !== 'Disputed') {
+      throw new BadRequestException('Đơn không ở trạng thái khiếu nại');
+    }
+
+    const product = order.product;
+    if (!product) throw new NotFoundException('Sản phẩm không tồn tại');
+    const sellerId = Number(product.sellerId);
+    const buyerId = Number(order.buyerId);
+    const note = opts?.note?.trim() || '';
+    const penaltyPoints = Math.min(
+      200,
+      Math.max(0, Number(opts?.penaltyPoints ?? 50)),
+    );
+    const skipPenalty = opts?.skipPenalty === true;
+
+    if (decision === 'REFUND_BUYER') {
+      const payment = await this.paymentRepo.findOne({ where: { orderId } });
+      if (payment?.paymentMethod === 'ONLINE_ESCROW') {
+        await this.paymentsService.refundEscrow(orderId);
+      } else if (payment && payment.escrowStatus === 'Holding') {
+        payment.escrowStatus = 'Refunded';
+        await this.paymentRepo.save(payment);
+      }
+
+      order.orderStatus = 'Cancelled';
+      order.cancelReason =
+        note ||
+        `Admin hoàn tiền người mua (khiếu nại: ${order.disputeType ?? ''})`;
+      await this.orderRepo.save(order);
+
+      if (product.status !== 'Sold') {
+        product.status = 'Available';
+        await this.productRepo.save(product);
+      }
+
+      if (!skipPenalty && penaltyPoints > 0) {
+        await this.reputationService.adjustPoints(
+          sellerId,
+          -penaltyPoints,
+          'DISPUTE_PENALTY',
+          `Khiếu nại đơn #${orderId}: hoàn tiền người mua. ${note}`.slice(0, 255),
+        );
+      }
+
+      await this.notify(buyerId, {
+        title: 'Khiếu nại được chấp nhận',
+        body: `Đơn #${orderId}: admin quyết định hoàn tiền cho bạn.${note ? ` Ghi chú: ${note}` : ''}`,
+        payload: { action: 'DISPUTE_RESOLVED', orderId, decision },
+      });
+      await this.notify(sellerId, {
+        title: 'Khiếu nại: hoàn tiền người mua',
+        body: `Đơn #${orderId}: admin hoàn tiền cho người mua.${
+          !skipPenalty && penaltyPoints > 0
+            ? ` Bạn bị trừ ${penaltyPoints} điểm tín nhiệm.`
+            : ''
+        }${note ? ` Ghi chú: ${note}` : ''}`,
+        payload: {
+          action: 'DISPUTE_RESOLVED',
+          orderId,
+          decision,
+          penaltyPoints: skipPenalty ? 0 : penaltyPoints,
+        },
+      });
+
+      return {
+        orderId,
+        decision,
+        orderStatus: 'Cancelled',
+        escrow: 'Refunded',
+        penaltyUserId: sellerId,
+        penaltyPoints: skipPenalty ? 0 : penaltyPoints,
+      };
+    }
+
+    // RELEASE_SELLER
+    const payment = await this.paymentRepo.findOne({ where: { orderId } });
+    if (payment?.paymentMethod === 'ONLINE_ESCROW') {
+      await this.paymentsService.releaseEscrow(orderId);
+      await this.walletService.creditSale(
+        sellerId,
+        Number(payment.amount),
+        `ORDER-${orderId}`,
+        `Giải ngân sau khiếu nại đơn #${orderId}`,
+      );
+    } else if (payment && payment.escrowStatus === 'Holding') {
+      payment.escrowStatus = 'Released';
+      await this.paymentRepo.save(payment);
+    }
+
+    order.orderStatus = 'Completed';
+    order.completedAt = new Date();
+    order.cancelReason = null;
+    await this.orderRepo.save(order);
+
+    product.status = 'Sold';
+    await this.productRepo.save(product);
+
+    if (!skipPenalty && penaltyPoints > 0) {
+      await this.reputationService.adjustPoints(
+        buyerId,
+        -penaltyPoints,
+        'DISPUTE_PENALTY',
+        `Khiếu nại đơn #${orderId}: giải ngân người bán. ${note}`.slice(0, 255),
+      );
+    }
+
+    // Thưởng người bán (không thưởng người mua khi họ thua khiếu nại).
+    await this.reputationService.adjustPoints(
+      sellerId,
+      20,
+      'ORDER_COMPLETE',
+      `Hoàn tất đơn #${orderId} sau khiếu nại [ORDER-${orderId}]`,
+      { idempotentKey: `ORDER-${orderId}` },
+    );
+
+    await this.notify(sellerId, {
+      title: 'Khiếu nại: giải ngân cho bạn',
+      body: `Đơn #${orderId}: admin giải ngân / xác nhận giao dịch thành công.${note ? ` Ghi chú: ${note}` : ''}`,
+      payload: { action: 'DISPUTE_RESOLVED', orderId, decision },
+    });
+    await this.notify(buyerId, {
+      title: 'Khiếu nại bị từ chối',
+      body: `Đơn #${orderId}: admin quyết định giải ngân cho người bán.${
+        !skipPenalty && penaltyPoints > 0
+          ? ` Bạn bị trừ ${penaltyPoints} điểm tín nhiệm.`
+          : ''
+      }${note ? ` Ghi chú: ${note}` : ''}`,
+      payload: {
+        action: 'DISPUTE_RESOLVED',
+        orderId,
+        decision,
+        penaltyPoints: skipPenalty ? 0 : penaltyPoints,
+      },
+    });
+
+    return {
+      orderId,
+      decision,
+      orderStatus: 'Completed',
+      escrow: 'Released',
+      penaltyUserId: buyerId,
+      penaltyPoints: skipPenalty ? 0 : penaltyPoints,
+    };
+  }
+
+  listPendingWithdrawals(status?: string) {
+    return this.walletService.listWithdrawalsForAdmin(status);
+  }
+
+  async approveWithdrawal(withdrawalId: number, note?: string) {
+    const result = await this.walletService.approveWithdrawal(
+      withdrawalId,
+      note,
+    );
+    const userId = Number(result.userId);
+    if (userId) {
+      await this.notify(userId, {
+        title: 'Yêu cầu rút tiền đã được duyệt',
+        body: `Lệnh rút ${result.amountFormatted as string} đã được duyệt và chuyển khoản.`,
+        payload: { action: 'WITHDRAWAL_APPROVED', withdrawalId },
+      });
+    }
+    return result;
+  }
+
+  async rejectWithdrawal(withdrawalId: number, note?: string) {
+    const result = await this.walletService.rejectWithdrawal(
+      withdrawalId,
+      note,
+    );
+    const userId = Number(result.userId);
+    if (userId) {
+      await this.notify(userId, {
+        title: 'Yêu cầu rút tiền bị từ chối',
+        body: `Lệnh rút ${result.amountFormatted as string} bị từ chối. Tiền đã hoàn về ví.${
+          note ? ` Lý do: ${note}` : ''
+        }`,
+        payload: { action: 'WITHDRAWAL_REJECTED', withdrawalId },
+      });
+    }
+    return result;
   }
 
   private async requireNonAdminUser(userId: number): Promise<User> {

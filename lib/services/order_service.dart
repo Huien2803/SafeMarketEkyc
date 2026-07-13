@@ -11,14 +11,18 @@ class OrderService {
   OrderService._();
   static final OrderService instance = OrderService._();
 
-  Map<String, String> get _headers {
-    final token = AuthService.instance.accessToken;
-    return {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      if (token != null) 'Authorization': 'Bearer $token',
-    };
-  }
+  Map<String, String> get _headers => AuthService.instance.authHeaders;
+
+  Future<http.Response> _authGet(Uri uri) =>
+      AuthService.instance.authorizedRequest(
+        (h) => http.get(uri, headers: h).timeout(ApiConfig.timeout),
+      );
+
+  Future<http.Response> _authPost(Uri uri, {Object? body}) =>
+      AuthService.instance.authorizedRequest(
+        (h) =>
+            http.post(uri, headers: h, body: body).timeout(ApiConfig.timeout),
+      );
 
   Future<OrderItem> createOrder({
     required int productId,
@@ -27,18 +31,15 @@ class OrderService {
     String deliveryMethod = 'DIRECT',
   }) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/orders');
-    final res = await http
-        .post(
-          uri,
-          headers: _headers,
-          body: jsonEncode({
-            'productId': productId,
-            'shippingAddress': shippingAddress,
-            'paymentMethod': paymentMethod,
-            'deliveryMethod': deliveryMethod,
-          }),
-        )
-        .timeout(ApiConfig.timeout);
+    final res = await _authPost(
+      uri,
+      body: jsonEncode({
+        'productId': productId,
+        'shippingAddress': shippingAddress,
+        'paymentMethod': paymentMethod,
+        'deliveryMethod': deliveryMethod,
+      }),
+    );
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     if (res.statusCode >= 200 && res.statusCode < 300) {
       return OrderItem.fromJson(body);
@@ -55,7 +56,7 @@ class OrderService {
 
   Future<OrderItem> getOrder(int orderId) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/orders/$orderId');
-    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await _authGet(uri);
     if (res.statusCode != 200) {
       throw Exception('Không tải được đơn hàng');
     }
@@ -65,7 +66,7 @@ class OrderService {
 
   Future<List<OrderItem>> getMyOrders() async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/orders/my');
-    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await _authGet(uri);
     if (res.statusCode != 200) return [];
     return (jsonDecode(res.body) as List<dynamic>)
         .map((e) => OrderItem.fromJson(e as Map<String, dynamic>))
@@ -86,6 +87,36 @@ class OrderService {
     return all.where((o) => o.sellerId == myId).toList();
   }
 
+  /// Người mua đổi phương thức thanh toán / giao hàng khi đơn còn Pending.
+  Future<OrderItem> changePaymentMethod(
+    int orderId, {
+    required String paymentMethod,
+    required String deliveryMethod,
+    String? shippingAddress,
+  }) async {
+    final uri =
+        Uri.parse('${ApiConfig.baseUrl}/orders/$orderId/payment-method');
+    final res = await http
+        .post(
+          uri,
+          headers: _headers,
+          body: jsonEncode({
+            'paymentMethod': paymentMethod,
+            'deliveryMethod': deliveryMethod,
+            if (shippingAddress != null && shippingAddress.isNotEmpty)
+              'shippingAddress': shippingAddress,
+          }),
+        )
+        .timeout(ApiConfig.timeout);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      return OrderItem.fromJson(body);
+    }
+    final msg = body['message'];
+    if (msg is List && msg.isNotEmpty) throw Exception(msg.join('\n'));
+    throw Exception(msg is String ? msg : 'Không đổi được phương thức');
+  }
+
   Future<OrderItem> markShipped(int orderId) async =>
       _postAction(orderId, 'ship');
 
@@ -97,25 +128,27 @@ class OrderService {
 
   /// Người mua xác nhận đã nhận hàng kèm ảnh bằng chứng (bắt buộc).
   Future<OrderItem> markCompleted(int orderId, {required XFile proofImage}) async {
-    final token = AuthService.instance.accessToken;
-    final uri = Uri.parse('${ApiConfig.baseUrl}/orders/$orderId/complete');
-    final req = http.MultipartRequest('POST', uri)
-      ..headers['Accept'] = 'application/json';
-    if (token != null) {
-      req.headers['Authorization'] = 'Bearer $token';
+    Future<http.Response> send(Map<String, String> headers) async {
+      final uri = Uri.parse('${ApiConfig.baseUrl}/orders/$orderId/complete');
+      final req = http.MultipartRequest('POST', uri)
+        ..headers['Accept'] = 'application/json';
+      final auth = headers['Authorization'];
+      if (auth != null) req.headers['Authorization'] = auth;
+
+      final bytes = await proofImage.readAsBytes();
+      req.files.add(
+        http.MultipartFile.fromBytes(
+          'proof',
+          bytes,
+          filename: proofImage.name.isNotEmpty ? proofImage.name : 'receipt.jpg',
+        ),
+      );
+
+      final streamed = await req.send().timeout(const Duration(seconds: 60));
+      return http.Response.fromStream(streamed);
     }
 
-    final bytes = await proofImage.readAsBytes();
-    req.files.add(
-      http.MultipartFile.fromBytes(
-        'proof',
-        bytes,
-        filename: proofImage.name.isNotEmpty ? proofImage.name : 'receipt.jpg',
-      ),
-    );
-
-    final streamed = await req.send().timeout(const Duration(seconds: 60));
-    final res = await http.Response.fromStream(streamed);
+    final res = await AuthService.instance.authorizedRequest(send);
     final body = res.body.isNotEmpty
         ? jsonDecode(res.body) as Map<String, dynamic>
         : <String, dynamic>{};
@@ -168,8 +201,7 @@ class OrderService {
 
   Future<OrderItem> _postAction(int orderId, String action) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/orders/$orderId/$action');
-    final res =
-        await http.post(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await _authPost(uri);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     if (res.statusCode >= 200 && res.statusCode < 300) {
       return OrderItem.fromJson(body);
@@ -179,7 +211,7 @@ class OrderService {
 
   Future<List<SoldListing>> getSoldProducts() async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/users/me/sold-products');
-    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await _authGet(uri);
     if (res.statusCode != 200) return [];
     return (jsonDecode(res.body) as List<dynamic>)
         .map((e) => SoldListing.fromJson(e as Map<String, dynamic>))
@@ -188,7 +220,7 @@ class OrderService {
 
   Future<List<SoldListing>> getUserListings(int userId) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/users/$userId/listings');
-    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await _authGet(uri);
     if (res.statusCode != 200) return [];
     return (jsonDecode(res.body) as List<dynamic>)
         .map((e) => SoldListing.fromJson(e as Map<String, dynamic>))

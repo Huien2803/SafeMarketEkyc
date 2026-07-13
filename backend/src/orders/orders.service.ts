@@ -19,11 +19,17 @@ import {
 } from '../common/utils/format.util';
 import {
   CancelOrderDto,
+  ChangePaymentMethodDto,
   CreateOrderDto,
   DisputeOrderDto,
 } from './dto/order.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentsService } from '../payments/payments.service';
+import { WalletService } from '../wallet/wallet.service';
+import { ReputationService } from '../reputation/reputation.service';
+
+/** Điểm thưởng khi hoàn tất giao dịch thành công (mỗi bên). */
+const COMPLETE_ORDER_BONUS = 20;
 
 @Injectable()
 export class OrdersService {
@@ -35,9 +41,18 @@ export class OrdersService {
     @InjectRepository(Review) private readonly reviewRepo: Repository<Review>,
     private readonly notificationsService: NotificationsService,
     private readonly paymentsService: PaymentsService,
+    private readonly walletService: WalletService,
+    private readonly reputationService: ReputationService,
   ) {}
 
   async createOrder(buyerId: number, dto: CreateOrderDto): Promise<Record<string, unknown>> {
+    const buyer = await this.userRepo.findOne({ where: { userId: buyerId } });
+    if (!buyer || buyer.kycStatus !== 'Verified') {
+      throw new ForbiddenException(
+        'Bạn cần xác thực danh tính (eKYC) trước khi mua hàng',
+      );
+    }
+
     const product = await this.productRepo.findOne({
       where: { productId: dto.productId },
       relations: ['seller'],
@@ -115,6 +130,60 @@ export class OrdersService {
 
   async getOrder(orderId: number, userId: number): Promise<Record<string, unknown>> {
     await this.requireParticipant(orderId, userId);
+    return this.toOrderJson(orderId);
+  }
+
+  /**
+   * Người mua đổi phương thức thanh toán / giao hàng khi đơn còn Pending
+   * (chưa thanh toán, chưa giao). Reset lại bản ghi thanh toán tạm nếu có.
+   */
+  async changePaymentMethod(
+    orderId: number,
+    userId: number,
+    dto: ChangePaymentMethodDto,
+  ): Promise<Record<string, unknown>> {
+    const order = await this.requireParticipant(orderId, userId);
+    if (Number(order.buyerId) !== userId) {
+      throw new ForbiddenException('Chỉ người mua mới đổi phương thức thanh toán');
+    }
+    if (order.orderStatus !== 'Pending') {
+      throw new BadRequestException(
+        'Chỉ đổi được khi đơn chưa thanh toán / chưa giao',
+      );
+    }
+
+    const newPay = dto.paymentMethod ?? order.paymentMethod;
+    const newDel = dto.deliveryMethod ?? order.deliveryMethod;
+    order.paymentMethod = newPay;
+    order.deliveryMethod = newDel;
+    if (dto.shippingAddress && dto.shippingAddress.trim()) {
+      order.shippingAddress = dto.shippingAddress.trim();
+    }
+    await this.orderRepo.save(order);
+
+    // Đơn còn Pending nghĩa là chưa có tiền thực nào được ghi nhận → xoá bản
+    // ghi thanh toán tạm (nếu có) và tạo lại theo phương thức mới.
+    const existingPayment = await this.paymentRepo.findOne({
+      where: { orderId },
+    });
+    if (existingPayment) {
+      await this.paymentRepo.remove(existingPayment);
+    }
+    if (newPay === 'BANK_TRANSFER') {
+      const product = await this.productRepo.findOne({
+        where: { productId: order.productId },
+      });
+      if (product) {
+        await this.paymentRepo.save({
+          orderId,
+          amount: product.price,
+          paymentMethod: newPay,
+          escrowStatus: 'Holding',
+          transactionRef: `ESC-${orderId}-${Date.now()}`,
+        });
+      }
+    }
+
     return this.toOrderJson(orderId);
   }
 
@@ -274,9 +343,39 @@ export class OrdersService {
     const payment = await this.paymentRepo.findOne({ where: { orderId } });
     if (payment?.paymentMethod === 'ONLINE_ESCROW') {
       await this.paymentsService.releaseEscrow(orderId);
+      // Escrow giải ngân → cộng tiền vào ví người bán để rút về ngân hàng.
+      if (product) {
+        await this.walletService.creditSale(
+          Number(product.sellerId),
+          Number(payment.amount),
+          `ORDER-${orderId}`,
+          `Bán "${product.title}" (đơn #${orderId})`,
+        );
+      }
     } else if (payment) {
       payment.escrowStatus = 'Released';
       await this.paymentRepo.save(payment);
+    }
+
+    // Cộng điểm tín nhiệm cho cả hai bên khi giao dịch thành công.
+    if (product) {
+      const sellerId = Number(product.sellerId);
+      const buyerId = Number(order.buyerId);
+      const key = `ORDER-${orderId}`;
+      await this.reputationService.adjustPoints(
+        buyerId,
+        COMPLETE_ORDER_BONUS,
+        'ORDER_COMPLETE',
+        `Hoàn tất đơn #${orderId} (người mua) [${key}]`,
+        { idempotentKey: key },
+      );
+      await this.reputationService.adjustPoints(
+        sellerId,
+        COMPLETE_ORDER_BONUS,
+        'ORDER_COMPLETE',
+        `Hoàn tất đơn #${orderId} (người bán) [${key}]`,
+        { idempotentKey: key },
+      );
     }
 
     return this.toOrderJson(orderId);
@@ -284,8 +383,12 @@ export class OrdersService {
 
   async cancel(orderId: number, userId: number, dto: CancelOrderDto) {
     const order = await this.requireParticipant(orderId, userId);
-    if (['Completed', 'Cancelled'].includes(order.orderStatus)) {
-      throw new BadRequestException('Không thể hủy đơn này');
+    if (['Completed', 'Cancelled', 'Disputed'].includes(order.orderStatus)) {
+      throw new BadRequestException(
+        order.orderStatus === 'Disputed'
+          ? 'Đơn đang khiếu nại — chờ quản trị viên xử lý, không tự hủy được'
+          : 'Không thể hủy đơn này',
+      );
     }
     order.orderStatus = 'Cancelled';
     order.cancelReason = dto.reason ?? 'Hủy đơn';
@@ -315,10 +418,41 @@ export class OrdersService {
     if (['Completed', 'Cancelled', 'Disputed'].includes(order.orderStatus)) {
       throw new BadRequestException('Không thể khiếu nại đơn này');
     }
+    if (!['Paid', 'Shipped'].includes(order.orderStatus)) {
+      throw new BadRequestException(
+        'Chỉ khiếu nại khi đơn đã thanh toán / đang giao',
+      );
+    }
     order.orderStatus = 'Disputed';
     order.disputeType = dto.type;
     order.disputeNote = dto.note ?? '';
     await this.orderRepo.save(order);
+
+    const product = await this.productRepo.findOne({
+      where: { productId: order.productId },
+    });
+    const sellerId = product ? Number(product.sellerId) : null;
+    const buyerId = Number(order.buyerId);
+    const otherId = userId === buyerId ? sellerId : buyerId;
+    const opener =
+      (await this.userRepo.findOne({ where: { userId } }))?.displayName ??
+      'Đối phương';
+    if (otherId) {
+      try {
+        await this.notificationsService.notifyAdminAction(otherId, {
+          title: 'Đơn hàng bị khiếu nại',
+          body: `${opener} đã mở khiếu nại cho đơn #${orderId}. Quản trị viên sẽ xem xét.`,
+          payload: {
+            action: 'DISPUTE_OPENED',
+            orderId,
+            type: dto.type,
+          },
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+
     return this.toOrderJson(orderId);
   }
 

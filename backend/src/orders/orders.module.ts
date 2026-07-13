@@ -3,6 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { WalletModule } from '../wallet/wallet.module';
+import { ReputationModule } from '../reputation/reputation.module';
 import { Order } from '../entities/order.entity';
 import { Payment } from '../entities/payment.entity';
 import { Product } from '../entities/product.entity';
@@ -17,6 +19,8 @@ import { OrdersService } from './orders.service';
     AuthModule,
     NotificationsModule,
     PaymentsModule,
+    WalletModule,
+    ReputationModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService],

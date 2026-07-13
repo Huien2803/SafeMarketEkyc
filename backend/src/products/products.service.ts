@@ -28,6 +28,8 @@ export class ProductsService {
     private readonly scoreRepo: Repository<Score>,
     @InjectRepository(Review)
     private readonly reviewRepo: Repository<Review>,
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
     private readonly categoriesService: CategoriesService,
     private readonly notificationsService: NotificationsService,
   ) {}
@@ -145,6 +147,13 @@ export class ProductsService {
     dto: CreateProductDto,
     file?: Express.Multer.File,
   ): Promise<Record<string, unknown>> {
+    const seller = await this.userRepo.findOne({ where: { userId: sellerId } });
+    if (!seller || seller.kycStatus !== 'Verified') {
+      throw new ForbiddenException(
+        'Bạn cần xác thực danh tính (eKYC) trước khi đăng bán sản phẩm',
+      );
+    }
+
     await this.categoriesService.findOne(dto.categoryId);
 
     let thumbnailUrl: string | null = null;

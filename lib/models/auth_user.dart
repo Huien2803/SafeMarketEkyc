@@ -57,9 +57,11 @@ class AuthResponse {
     required this.tokenType,
     required this.expiresIn,
     required this.user,
+    this.refreshToken,
   });
 
   final String accessToken;
+  final String? refreshToken;
   final String tokenType;
   final int expiresIn;
   final AuthUser user;
@@ -85,6 +87,7 @@ class AuthResponse {
     }
     return AuthResponse(
       accessToken: json['accessToken'] as String,
+      refreshToken: json['refreshToken'] as String?,
       tokenType: json['tokenType'] as String? ?? 'Bearer',
       expiresIn: (json['expiresIn'] as num?)?.toInt() ?? 0,
       user: AuthUser.fromJson(json['user'] as Map<String, dynamic>),

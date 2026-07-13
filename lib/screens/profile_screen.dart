@@ -12,6 +12,7 @@ import 'package:safemarket_app/screens/order_detail_screen.dart';
 import 'package:safemarket_app/screens/edit_profile_screen.dart';
 import 'package:safemarket_app/screens/seller_reviews_screen.dart';
 import 'package:safemarket_app/screens/product_detail.dart';
+import 'package:safemarket_app/screens/wallet_screen.dart';
 import 'package:safemarket_app/services/order_service.dart';
 import 'package:safemarket_app/services/user_service.dart';
 import 'package:safemarket_app/widgets/product_status_badge.dart';
@@ -322,6 +323,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               },
                             ),
                           ],
+                          const SizedBox(height: 10),
+                          _VerificationTile(
+                            icon: Icons.account_balance_wallet_outlined,
+                            iconColor: AppColors.trustGreen,
+                            title: 'Ví của tôi',
+                            subtitle:
+                                'Xem số dư bán hàng và rút tiền về ngân hàng',
+                            trailing: const Icon(
+                              Icons.chevron_right,
+                              color: AppColors.textMuted,
+                            ),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => const WalletScreen(),
+                                ),
+                              );
+                            },
+                          ),
                           const SizedBox(height: 10),
                           _VerificationTile(
                             icon: Icons.shopping_bag_outlined,

@@ -11,6 +11,7 @@ import 'package:safemarket_app/services/chat_service.dart';
 import 'package:safemarket_app/services/order_service.dart';
 import 'package:safemarket_app/services/payment_service.dart';
 import 'package:safemarket_app/services/review_service.dart';
+import 'package:safemarket_app/widgets/purchase_method_dialog.dart';
 import 'package:safemarket_app/widgets/review_submit_dialog.dart';
 
 class OrderDetailScreen extends StatefulWidget {
@@ -143,6 +144,98 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           const SnackBar(
             content: Text(
               'Đã xác nhận nhận hàng. Người bán đã được thông báo.',
+            ),
+          ),
+        );
+      }
+    });
+  }
+
+  /// Người mua đổi phương thức thanh toán khi đơn còn chờ xử lý.
+  Future<void> _changePaymentMethod(OrderItem o) async {
+    final result = await showPurchaseMethodDialog(
+      context,
+      productTitle: o.productTitle,
+      defaultAddress: o.shippingAddress,
+    );
+    if (result == null || !mounted) return;
+    await _run(() async {
+      await OrderService.instance.changePaymentMethod(
+        o.orderId,
+        paymentMethod: result.method.paymentMethod,
+        deliveryMethod: result.method.deliveryMethod,
+        shippingAddress: result.address,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Đã cập nhật phương thức thanh toán')),
+        );
+      }
+    });
+  }
+
+  /// Hủy đơn: xác nhận + cho nhập lý do. Cảnh báo hoàn tiền/trừ điểm nếu đã trả.
+  Future<void> _cancelOrder(OrderItem o) async {
+    final reasonCtrl = TextEditingController();
+    final paid = o.orderStatus == 'Paid' || o.orderStatus == 'Shipped';
+    final holdingEscrow = o.isOnlineEscrow && o.escrowStatus == 'Holding';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Hủy đơn hàng'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              holdingEscrow
+                  ? 'Tiền escrow đang tạm giữ sẽ được hoàn lại cho người mua.'
+                  : paid
+                      ? 'Đơn đã thanh toán — hủy lúc này có thể bị trừ điểm tín nhiệm.'
+                      : 'Bạn có chắc muốn hủy đơn hàng này?',
+              style: const TextStyle(fontSize: 13, height: 1.4),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Lý do hủy (không bắt buộc)',
+                hintText: 'VD: Đổi ý, tìm được sản phẩm khác...',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 2,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Không hủy'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Hủy đơn'),
+          ),
+        ],
+      ),
+    );
+    final reason = reasonCtrl.text.trim();
+    reasonCtrl.dispose();
+    if (confirmed != true || !mounted) return;
+
+    await _run(() async {
+      await OrderService.instance.cancelOrder(
+        o.orderId,
+        reason: reason.isNotEmpty ? reason : 'Người dùng hủy đơn',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              holdingEscrow
+                  ? 'Đã hủy đơn. Tiền escrow sẽ được hoàn cho người mua.'
+                  : 'Đã hủy đơn hàng.',
             ),
           ),
         );
@@ -370,6 +463,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   label: const Text('Chat trực tiếp với chủ bán'),
                 ),
                 const SizedBox(height: 12),
+                if (_isBuyer(o) && o.orderStatus == 'Pending') ...[
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : () => _changePaymentMethod(o),
+                    icon: const Icon(Icons.swap_horiz_outlined),
+                    label: const Text('Đổi phương thức thanh toán'),
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 if (_isBuyer(o) && o.needsOnlinePayment) ...[
                   FilledButton.icon(
                     onPressed: _busy ? null : () => _payOnlineEscrow(o),
@@ -479,10 +580,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                   type: 'NO_RECEIVE',
                                   note: 'Người mua báo không nhận được hàng',
                                 );
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Đã gửi khiếu nại. Admin sẽ xử lý hoàn/giải ngân.',
+                                      ),
+                                    ),
+                                  );
+                                }
                               }),
                       icon: const Icon(Icons.report_problem_outlined),
-                      label: const Text(
-                          'Không nhận được hàng (trừ điểm người bán)'),
+                      label: const Text('Không nhận được hàng — khiếu nại'),
                     ),
                     const SizedBox(height: 8),
                     OutlinedButton.icon(
@@ -494,28 +603,49 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                   type: 'WRONG_DELIVERY',
                                   note: 'Người mua báo giao hàng sai',
                                 );
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Đã gửi khiếu nại. Admin sẽ xử lý hoàn/giải ngân.',
+                                      ),
+                                    ),
+                                  );
+                                }
                               }),
                       icon: const Icon(Icons.warning_amber_outlined),
-                      label:
-                          const Text('Giao hàng sai (trừ điểm người bán)'),
+                      label: const Text('Giao hàng sai — khiếu nại'),
                     ),
                   ],
                 ],
+                if (o.orderStatus == 'Disputed') ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.warning.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text(
+                      'Đơn đang khiếu nại — chờ quản trị viên quyết định '
+                      'hoàn tiền người mua hoặc giải ngân người bán. '
+                      'Không thể tự hủy đơn ở bước này.',
+                      style: TextStyle(fontSize: 12, height: 1.4),
+                    ),
+                  ),
+                ],
                 if (o.orderStatus != 'Completed' &&
                     o.orderStatus != 'Cancelled' &&
+                    o.orderStatus != 'Disputed' &&
                     (_isBuyer(o) || _isSeller(o))) ...[
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
-                    onPressed: _busy
-                        ? null
-                        : () => _run(() async {
-                              await OrderService.instance.cancelOrder(
-                                o.orderId,
-                                reason: 'Hủy đơn (có thể bị trừ điểm nếu đã thanh toán)',
-                              );
-                            }),
+                    onPressed: _busy ? null : () => _cancelOrder(o),
                     icon: const Icon(Icons.cancel_outlined),
                     label: const Text('Hủy đơn hàng'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.danger,
+                    ),
                   ),
                 ],
                 if (o.orderStatus == 'Completed')

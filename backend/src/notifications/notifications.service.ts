@@ -116,6 +116,26 @@ export class NotificationsService {
     });
   }
 
+  /**
+   * Thông báo cho user về một hành động kỷ luật từ admin
+   * (cảnh cáo, trừ điểm, đình chỉ, khóa...). Kèm lý do trong payload.
+   */
+  async notifyAdminAction(
+    userId: number,
+    input: {
+      title: string;
+      body: string;
+      payload?: Record<string, unknown>;
+    },
+  ): Promise<void> {
+    await this.create(userId, {
+      type: 'ADMIN_ACTION',
+      title: input.title,
+      body: input.body,
+      payload: input.payload,
+    });
+  }
+
   private async create(
     userId: number,
     input: {

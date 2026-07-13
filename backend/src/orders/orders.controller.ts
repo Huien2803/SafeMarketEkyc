@@ -17,6 +17,7 @@ import { User } from '../entities/user.entity';
 import { OrdersService } from './orders.service';
 import {
   CancelOrderDto,
+  ChangePaymentMethodDto,
   CreateOrderDto,
   DisputeOrderDto,
 } from './dto/order.dto';
@@ -52,6 +53,20 @@ export class OrdersController {
     @Param('orderId', ParseIntPipe) orderId: number,
   ) {
     return this.ordersService.getOrder(orderId, Number(user.userId));
+  }
+
+  @Post(':orderId/payment-method')
+  @ApiOperation({ summary: 'Đổi phương thức thanh toán / giao hàng (đơn Pending)' })
+  changePaymentMethod(
+    @CurrentUser() user: User,
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Body() dto: ChangePaymentMethodDto,
+  ) {
+    return this.ordersService.changePaymentMethod(
+      orderId,
+      Number(user.userId),
+      dto,
+    );
   }
 
   @Post(':orderId/ship')

@@ -13,29 +13,22 @@ class UserService {
 
   /// Lấy profile của user đang đăng nhập (yêu cầu JWT trong header).
   Future<UserProfile> getMyProfile() async {
-    final token = AuthService.instance.accessToken;
-    if (token == null) {
+    if (!AuthService.instance.isLoggedIn) {
       throw AuthException('Chưa đăng nhập', statusCode: 401);
     }
 
     final uri = Uri.parse('${ApiConfig.baseUrl}/users/me');
     try {
-      final response = await http
-          .get(
-            uri,
-            headers: {
-              'Accept': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
-          )
-          .timeout(ApiConfig.timeout);
+      final response = await AuthService.instance.authorizedRequest(
+        (h) => http.get(uri, headers: h).timeout(ApiConfig.timeout),
+      );
 
       final decoded = response.body.isNotEmpty
           ? jsonDecode(response.body) as Map<String, dynamic>
           : <String, dynamic>{};
 
       if (response.statusCode == 401) {
-        await AuthService.instance.logout();
+        await AuthService.instance.clearSession();
         throw AuthException(
           'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại',
           statusCode: 401,
@@ -62,22 +55,38 @@ class UserService {
   Future<UserProfile> getProfile(int userId) async {
     final token = AuthService.instance.accessToken;
     final uri = Uri.parse('${ApiConfig.baseUrl}/users/$userId');
-    final response = await http
-        .get(
-          uri,
-          headers: {
-            'Accept': 'application/json',
-            if (token != null) 'Authorization': 'Bearer $token',
-          },
-        )
-        .timeout(ApiConfig.timeout);
+    try {
+      final response = await http
+          .get(
+            uri,
+            headers: {
+              'Accept': 'application/json',
+              if (token != null) 'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(ApiConfig.timeout);
 
-    if (response.statusCode != 200) {
-      throw AuthException('Không tải được hồ sơ user $userId');
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return UserProfile.fromJson(
+          jsonDecode(response.body) as Map<String, dynamic>,
+        );
+      }
+
+      final decoded = response.body.isNotEmpty
+          ? jsonDecode(response.body) as Map<String, dynamic>
+          : <String, dynamic>{};
+      final msg = decoded['message'];
+      throw AuthException(
+        msg is String
+            ? msg
+            : 'Không tải được hồ sơ (${response.statusCode})',
+        statusCode: response.statusCode,
+      );
+    } on AuthException {
+      rethrow;
+    } catch (e) {
+      throw AuthException('Không kết nối được server: $e');
     }
-    return UserProfile.fromJson(
-      jsonDecode(response.body) as Map<String, dynamic>,
-    );
   }
 
   Future<UserProfile> updateMyProfile({

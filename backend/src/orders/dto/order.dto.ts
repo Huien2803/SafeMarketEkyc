@@ -23,6 +23,23 @@ export class CreateOrderDto {
   deliveryMethod?: string;
 }
 
+export class ChangePaymentMethodDto {
+  @ApiProperty({ example: 'ONLINE_ESCROW', required: false })
+  @IsOptional()
+  @IsString()
+  paymentMethod?: string;
+
+  @ApiProperty({ example: 'SHIP', required: false })
+  @IsOptional()
+  @IsString()
+  deliveryMethod?: string;
+
+  @ApiProperty({ example: '123 Nguyễn Huệ, Q1, TP.HCM', required: false })
+  @IsOptional()
+  @IsString()
+  shippingAddress?: string;
+}
+
 export class CancelOrderDto {
   @ApiProperty({ example: 'Hủy đơn', required: false })
   @IsOptional()

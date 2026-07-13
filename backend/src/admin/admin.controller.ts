@@ -64,12 +64,32 @@ export class AdminController {
     return this.adminService.rejectEkyc(userId, body.reason);
   }
 
+  @Post('users/:userId/warn')
+  warnUser(
+    @Param('userId', ParseIntPipe) userId: number,
+    @Body() body: { reason?: string },
+  ) {
+    return this.adminService.warnUser(userId, body.reason ?? 'Vi phạm quy định');
+  }
+
   @Post('users/:userId/lock')
   lockUser(
     @Param('userId', ParseIntPipe) userId: number,
     @Body() body: { reason?: string },
   ) {
     return this.adminService.lockUser(userId, body.reason ?? 'Vi phạm');
+  }
+
+  @Post('users/:userId/suspend')
+  suspendUser(
+    @Param('userId', ParseIntPipe) userId: number,
+    @Body() body: { days?: number; reason?: string },
+  ) {
+    return this.adminService.suspendUser(
+      userId,
+      Number(body.days ?? 7),
+      body.reason ?? 'Vi phạm quy định',
+    );
   }
 
   @Post('users/:userId/ban')
@@ -113,5 +133,45 @@ export class AdminController {
   @Post('products/:productId/hide')
   hideProduct(@Param('productId', ParseIntPipe) productId: number) {
     return this.adminService.hideReportedProduct(productId);
+  }
+
+  @Get('disputes')
+  disputes() {
+    return this.adminService.getDisputes();
+  }
+
+  @Post('disputes/:orderId/resolve')
+  resolveDispute(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Body()
+    body: {
+      decision: 'REFUND_BUYER' | 'RELEASE_SELLER';
+      note?: string;
+      penaltyPoints?: number;
+      skipPenalty?: boolean;
+    },
+  ) {
+    return this.adminService.resolveDispute(orderId, body.decision, body);
+  }
+
+  @Get('withdrawals')
+  withdrawals(@Query('status') status?: string) {
+    return this.adminService.listPendingWithdrawals(status);
+  }
+
+  @Post('withdrawals/:id/approve')
+  approveWithdrawal(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { note?: string },
+  ) {
+    return this.adminService.approveWithdrawal(id, body.note);
+  }
+
+  @Post('withdrawals/:id/reject')
+  rejectWithdrawal(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { note?: string },
+  ) {
+    return this.adminService.rejectWithdrawal(id, body.note);
   }
 }

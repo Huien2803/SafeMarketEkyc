@@ -65,6 +65,11 @@ export class MailService {
     const text = `Mã OTP đăng ký SafeMarket của bạn là: ${otp}\nMã có hiệu lực trong 5 phút. Không chia sẻ mã này cho người khác.`;
 
     if (!this.transporter) {
+      if (!this.isDev) {
+        throw new ServiceUnavailableException(
+          'SMTP chưa cấu hình. Không thể gửi email trên production.',
+        );
+      }
       this.logDevOtp(email, otp);
       return false;
     }
@@ -96,6 +101,45 @@ export class MailService {
     }
   }
 
+  /** true nếu OTP được gửi qua SMTP; false nếu chỉ in ra console (dev). */
+  async sendPasswordResetOtp(email: string, otp: string): Promise<boolean> {
+    const subject = 'Mã đặt lại mật khẩu SafeMarket';
+    const text = `Mã OTP đặt lại mật khẩu SafeMarket của bạn là: ${otp}\nMã có hiệu lực trong 5 phút. Nếu bạn không yêu cầu, hãy bỏ qua email này.`;
+
+    if (!this.transporter) {
+      if (!this.isDev) {
+        throw new ServiceUnavailableException(
+          'SMTP chưa cấu hình. Không thể gửi email trên production.',
+        );
+      }
+      this.logDevOtp(email, otp);
+      return false;
+    }
+
+    try {
+      await this.transporter.sendMail({
+        from: this.from,
+        to: email,
+        subject,
+        text,
+        html: this.buildResetHtml(otp),
+      });
+      this.logger.log(`Đã gửi OTP đặt lại mật khẩu tới ${email}`);
+      return true;
+    } catch (err) {
+      this.logger.error(
+        `Gửi OTP reset tới ${email} thất bại: ${(err as Error).message}`,
+      );
+      if (this.isDev) {
+        this.logDevOtp(email, otp);
+        return false;
+      }
+      throw new ServiceUnavailableException(
+        'Không thể gửi email. Kiểm tra cấu hình SMTP trong .env.',
+      );
+    }
+  }
+
   private isRealSmtpConfig(host: string, user: string, pass: string): boolean {
     if (!host || !user || !pass) return false;
     const combined = `${host} ${user} ${pass}`.toLowerCase();
@@ -118,6 +162,21 @@ export class MailService {
              border-radius:8px">${otp}</div>
         <p style="color:#64748b;font-size:13px;margin-top:16px">
           Mã có hiệu lực trong 5 phút. Vui lòng không chia sẻ mã này cho bất kỳ ai.
+        </p>
+      </div>`;
+  }
+
+  private buildResetHtml(otp: string): string {
+    return `
+      <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto">
+        <h2 style="color:#2563eb">SafeMarket</h2>
+        <p>Mã xác thực để đặt lại mật khẩu của bạn:</p>
+        <div style="font-size:32px;font-weight:bold;letter-spacing:8px;
+             color:#111;background:#f1f5f9;padding:16px;text-align:center;
+             border-radius:8px">${otp}</div>
+        <p style="color:#64748b;font-size:13px;margin-top:16px">
+          Mã có hiệu lực trong 5 phút. Nếu bạn không yêu cầu đặt lại mật khẩu,
+          hãy bỏ qua email này.
         </p>
       </div>`;
   }

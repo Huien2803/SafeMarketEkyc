@@ -7,13 +7,21 @@ import { Product } from '../entities/product.entity';
 import { ProductImage } from '../entities/product-image.entity';
 import { Score } from '../entities/score.entity';
 import { Review } from '../entities/review.entity';
+import { User } from '../entities/user.entity';
 import { CategoriesService } from './categories.service';
 import { ProductsService } from './products.service';
 import { ProductsController } from './products.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Category, Product, ProductImage, Score, Review]),
+    TypeOrmModule.forFeature([
+      Category,
+      Product,
+      ProductImage,
+      Score,
+      Review,
+      User,
+    ]),
     AuthModule,
     NotificationsModule,
   ],

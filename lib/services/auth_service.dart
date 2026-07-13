@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:safemarket_app/models/auth_user.dart';
 import 'package:safemarket_app/services/api_config.dart';
@@ -30,28 +31,55 @@ class AuthException implements Exception {
   String toString() => 'AuthException($statusCode): $message';
 }
 
-/// Service xử lý đăng ký, đăng nhập, lưu/đọc JWT token.
-///
-/// Token được lưu trong SharedPreferences (đơn giản, đủ cho KLTN).
-/// Production thật nên dùng `flutter_secure_storage`.
+/// Service xử lý đăng ký, đăng nhập, lưu/đọc JWT + refresh token.
 class AuthService extends ChangeNotifier {
   AuthService._();
   static final AuthService instance = AuthService._();
 
   static const _kTokenKey = 'safemarket.access_token';
+  static const _kRefreshKey = 'safemarket.refresh_token';
   static const _kUserKey = 'safemarket.user_json';
 
+  static const _secure = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
+
   String? _accessToken;
+  String? _refreshToken;
   AuthUser? _currentUser;
+  Future<bool>? _refreshInFlight;
 
   String? get accessToken => _accessToken;
+  String? get refreshToken => _refreshToken;
   AuthUser? get currentUser => _currentUser;
   bool get isLoggedIn => _currentUser != null;
 
-  /// Đọc token đã lưu từ disk khi app khởi động.
+  Map<String, String> get authHeaders {
+    final token = _accessToken;
+    return {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      if (token != null) 'Authorization': 'Bearer $token',
+    };
+  }
+
+  /// Đọc token đã lưu khi app khởi động (secure storage + migrate từ prefs cũ).
   Future<void> loadFromStorage() async {
     final prefs = await SharedPreferences.getInstance();
-    _accessToken = prefs.getString(_kTokenKey);
+
+    _accessToken = await _secure.read(key: _kTokenKey);
+    _refreshToken = await _secure.read(key: _kRefreshKey);
+
+    // Migrate từ SharedPreferences (bản cũ) sang secure storage.
+    if (_accessToken == null) {
+      final legacy = prefs.getString(_kTokenKey);
+      if (legacy != null) {
+        _accessToken = legacy;
+        await _secure.write(key: _kTokenKey, value: legacy);
+        await prefs.remove(_kTokenKey);
+      }
+    }
+
     final userJson = prefs.getString(_kUserKey);
     if (userJson != null) {
       try {
@@ -61,12 +89,12 @@ class AuthService extends ChangeNotifier {
       } catch (_) {
         _currentUser = null;
         _accessToken = null;
+        _refreshToken = null;
       }
     }
     notifyListeners();
   }
 
-  /// Bước 1: gửi yêu cầu đăng ký -> backend gửi OTP về email.
   Future<RegisterOtpResult> requestRegisterOtp({
     required String phoneNumber,
     required String email,
@@ -91,7 +119,6 @@ class AuthService extends ChangeNotifier {
     );
   }
 
-  /// Bước 2: xác thực OTP -> tạo tài khoản và đăng nhập luôn.
   Future<AuthResponse> verifyRegisterOtp({
     required String email,
     required String otp,
@@ -103,17 +130,69 @@ class AuthService extends ChangeNotifier {
     return _finishAuth(res);
   }
 
+  Future<RegisterOtpResult> requestPasswordResetOtp({
+    required String email,
+  }) async {
+    final res = await _postJson('/auth/password/forgot', {'email': email});
+    final secs = res['expiresInSeconds'];
+    return RegisterOtpResult(
+      expiresInSeconds: secs is int ? secs : 300,
+      devOtp: res['devOtp'] as String?,
+      message: res['message'] as String?,
+    );
+  }
+
+  Future<String> resetPassword({
+    required String email,
+    required String otp,
+    required String newPassword,
+  }) async {
+    final res = await _postJson('/auth/password/reset', {
+      'email': email,
+      'otp': otp,
+      'newPassword': newPassword,
+    });
+    return res['message'] as String? ?? 'Đặt lại mật khẩu thành công.';
+  }
+
   Future<AuthResponse> login({
     required String identifier,
     required String password,
   }) async {
-    // Java API: LoginRequest { email, password }
     final body = <String, dynamic>{
       'email': identifier.trim(),
       'password': password,
     };
     final res = await _postJson('/auth/login', body);
     return _finishAuth(res);
+  }
+
+  /// Làm mới access token. Trả về false nếu refresh thất bại.
+  Future<bool> refresh() async {
+    if (_refreshInFlight != null) return _refreshInFlight!;
+    _refreshInFlight = _doRefresh();
+    try {
+      return await _refreshInFlight!;
+    } finally {
+      _refreshInFlight = null;
+    }
+  }
+
+  Future<bool> _doRefresh() async {
+    final rt = _refreshToken;
+    if (rt == null || rt.isEmpty) return false;
+    try {
+      final res = await _postJson('/auth/refresh', {'refreshToken': rt});
+      await _finishAuth(res);
+      return true;
+    } on AuthException catch (e) {
+      if (e.statusCode == 401) {
+        await clearSession();
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<AuthResponse> _finishAuth(Map<String, dynamic> res) async {
@@ -127,12 +206,39 @@ class AuthService extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    final rt = _refreshToken;
+    if (rt != null && rt.isNotEmpty) {
+      try {
+        await _postJson('/auth/logout', {'refreshToken': rt});
+      } catch (_) {
+        // Vẫn xóa session local dù revoke thất bại.
+      }
+    }
+    await clearSession();
+  }
+
+  Future<void> clearSession() async {
     _accessToken = null;
+    _refreshToken = null;
     _currentUser = null;
+    await _secure.delete(key: _kTokenKey);
+    await _secure.delete(key: _kRefreshKey);
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kTokenKey);
     await prefs.remove(_kUserKey);
     notifyListeners();
+  }
+
+  /// Gửi request có Bearer; nếu 401 thì refresh 1 lần rồi retry.
+  Future<http.Response> authorizedRequest(
+    Future<http.Response> Function(Map<String, String> headers) send,
+  ) async {
+    var res = await send(authHeaders);
+    if (res.statusCode != 401) return res;
+
+    final ok = await refresh();
+    if (!ok) return res;
+    return send(authHeaders);
   }
 
   Future<Map<String, dynamic>> _postJson(
@@ -180,14 +286,22 @@ class AuthService extends ChangeNotifier {
 
   Future<void> _persist(AuthResponse auth) async {
     _accessToken = auth.accessToken;
+    if (auth.refreshToken != null && auth.refreshToken!.isNotEmpty) {
+      _refreshToken = auth.refreshToken;
+    }
     _currentUser = auth.user;
+
+    await _secure.write(key: _kTokenKey, value: auth.accessToken);
+    if (_refreshToken != null) {
+      await _secure.write(key: _kRefreshKey, value: _refreshToken);
+    }
+
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kTokenKey, auth.accessToken);
+    await prefs.remove(_kTokenKey); // không lưu access token plaintext nữa
     await prefs.setString(_kUserKey, jsonEncode(auth.user.toJson()));
     notifyListeners();
   }
 
-  /// Cập nhật thông tin user trong bộ nhớ sau khi sửa hồ sơ.
   Future<void> updateCachedUser({
     String? displayName,
     String? phoneNumber,

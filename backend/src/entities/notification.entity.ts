@@ -13,6 +13,7 @@ export type NotificationType =
   | 'NEW_PRODUCT'
   | 'PRODUCT_SOLD'
   | 'ORDER_RECEIVED'
+  | 'ADMIN_ACTION'
   | 'INFO';
 
 @Entity({ schema: 'Market', name: 'Notifications' })

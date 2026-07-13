@@ -10,7 +10,7 @@ import { Score } from './score.entity';
 import { EkycProfile } from './ekyc-profile.entity';
 
 export type KycStatus = 'Unverified' | 'Pending' | 'Verified' | 'Rejected';
-export type AccountStatus = 'Active' | 'Locked' | 'Banned';
+export type AccountStatus = 'Active' | 'Locked' | 'Banned' | 'Deleted';
 
 @Entity({ schema: 'Identity', name: 'Users' })
 @Index('IX_Users_KycStatus', ['kycStatus'])
@@ -58,6 +58,10 @@ export class User {
 
   @Column({ name: 'locked_at', type: 'datetime2', nullable: true })
   lockedAt: Date | null;
+
+  /** Thời điểm hết hạn đình chỉ tạm thời. NULL = khóa/cấm vô thời hạn. */
+  @Column({ name: 'locked_until', type: 'datetime2', nullable: true })
+  lockedUntil: Date | null;
 
   @Column({
     name: 'lock_reason',

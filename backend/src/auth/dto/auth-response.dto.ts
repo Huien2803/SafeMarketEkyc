@@ -27,10 +27,16 @@ export class AuthResponseDto {
   @ApiProperty({ example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' })
   accessToken: string;
 
+  @ApiProperty({
+    example: 'a1b2c3d4e5f6...',
+    description: 'Opaque refresh token — lưu an toàn, dùng để lấy access mới',
+  })
+  refreshToken: string;
+
   @ApiProperty({ example: 'Bearer' })
   tokenType: string;
 
-  @ApiProperty({ example: 604800, description: 'Số giây token có hiệu lực' })
+  @ApiProperty({ example: 900, description: 'Số giây access token còn hiệu lực' })
   expiresIn: number;
 
   @ApiProperty({ type: AuthUserDto })

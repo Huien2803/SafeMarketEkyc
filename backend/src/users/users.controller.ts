@@ -25,6 +25,7 @@ import { UsersService } from './users.service';
 import { UserProfileDto } from './dto/user-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { OptionalJwtAuthGuard } from '../common/guards/optional-jwt.guard';
 import { User } from '../entities/user.entity';
 import {
   avatarImageFilter,
@@ -32,13 +33,13 @@ import {
 } from './avatar-upload.config';
 
 @ApiTags('users')
-@ApiBearerAuth('JWT-auth')
-@UseGuards(AuthGuard('jwt'))
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get('me')
+  @ApiBearerAuth('JWT-auth')
+  @UseGuards(AuthGuard('jwt'))
   @ApiOperation({ summary: 'Profile + Trust Score + eKYC status của tôi' })
   @ApiResponse({ status: 200, type: UserProfileDto })
   getMe(@CurrentUser() user: User): Promise<UserProfileDto> {
@@ -46,6 +47,8 @@ export class UsersController {
   }
 
   @Put('me')
+  @ApiBearerAuth('JWT-auth')
+  @UseGuards(AuthGuard('jwt'))
   @ApiOperation({ summary: 'Cập nhật hồ sơ cá nhân' })
   @ApiResponse({ status: 200, type: UserProfileDto })
   updateMe(@CurrentUser() user: User, @Body() dto: UpdateProfileDto) {
@@ -53,6 +56,8 @@ export class UsersController {
   }
 
   @Post('me/avatar')
+  @ApiBearerAuth('JWT-auth')
+  @UseGuards(AuthGuard('jwt'))
   @ApiOperation({ summary: 'Tải lên ảnh đại diện (file ảnh, không dùng URL)' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -81,6 +86,8 @@ export class UsersController {
   }
 
   @Get('me/sold-products')
+  @ApiBearerAuth('JWT-auth')
+  @UseGuards(AuthGuard('jwt'))
   @ApiOperation({ summary: 'Sản phẩm đang rao / đã bán của tôi' })
   getSoldProducts(@CurrentUser() user: User) {
     return this.usersService.getSoldProducts(Number(user.userId));
@@ -93,12 +100,16 @@ export class UsersController {
   }
 
   @Get(':id')
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({ summary: 'Xem profile public của user khác' })
   @ApiResponse({ status: 200, type: UserProfileDto })
   getById(
     @Param('id', ParseIntPipe) id: number,
-    @CurrentUser() viewer: User,
+    @CurrentUser() viewer?: User,
   ): Promise<UserProfileDto> {
-    return this.usersService.getProfile(id, Number(viewer.userId));
+    return this.usersService.getProfile(
+      id,
+      viewer ? Number(viewer.userId) : undefined,
+    );
   }
 }

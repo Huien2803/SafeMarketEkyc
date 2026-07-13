@@ -90,6 +90,11 @@ class _MarketplaceHomeScreenState extends State<MarketplaceHomeScreen> {
       message: 'Đăng nhập để đăng bán sản phẩm của bạn.',
     );
     if (!ok || !mounted) return;
+    final verified = await ensureEkycVerified(
+      context,
+      message: 'Bạn cần xác thực danh tính (eKYC) trước khi đăng bán sản phẩm.',
+    );
+    if (!verified || !mounted) return;
     _homeTabKey.currentState?.reloadProducts();
     final posted = await Navigator.push<bool>(
       context,

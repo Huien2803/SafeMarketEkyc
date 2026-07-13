@@ -26,20 +26,13 @@ class NotificationService extends ChangeNotifier {
   }
 
   Future<void> syncFromApi() async {
-    final token = AuthService.instance.accessToken;
-    if (token == null) return;
+    if (!AuthService.instance.isLoggedIn) return;
 
     try {
       final uri = Uri.parse('${ApiConfig.baseUrl}/notifications');
-      final res = await http
-          .get(
-            uri,
-            headers: {
-              'Accept': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
-          )
-          .timeout(ApiConfig.timeout);
+      final res = await AuthService.instance.authorizedRequest(
+        (h) => http.get(uri, headers: h).timeout(ApiConfig.timeout),
+      );
 
       if (res.statusCode != 200) return;
 
@@ -61,12 +54,13 @@ class NotificationService extends ChangeNotifier {
     _items[i] = _items[i].copyWith(read: true);
     notifyListeners();
 
-    final token = AuthService.instance.accessToken;
-    if (token == null) return;
+    if (!AuthService.instance.isLoggedIn) return;
     try {
-      await http.patch(
-        Uri.parse('${ApiConfig.baseUrl}/notifications/$id/read'),
-        headers: {'Authorization': 'Bearer $token'},
+      await AuthService.instance.authorizedRequest(
+        (h) => http.patch(
+          Uri.parse('${ApiConfig.baseUrl}/notifications/$id/read'),
+          headers: h,
+        ),
       );
     } catch (_) {}
   }
@@ -79,12 +73,13 @@ class NotificationService extends ChangeNotifier {
     }
     notifyListeners();
 
-    final token = AuthService.instance.accessToken;
-    if (token == null) return;
+    if (!AuthService.instance.isLoggedIn) return;
     try {
-      await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/notifications/read-all'),
-        headers: {'Authorization': 'Bearer $token'},
+      await AuthService.instance.authorizedRequest(
+        (h) => http.post(
+          Uri.parse('${ApiConfig.baseUrl}/notifications/read-all'),
+          headers: h,
+        ),
       );
     } catch (_) {}
   }

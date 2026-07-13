@@ -4,6 +4,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { ensureProductUploadDir } from './products/product-upload.config';
 import { ensureChatUploadDir } from './chat/chat-upload.config';
@@ -15,7 +16,44 @@ async function bootstrap() {
     logger: ['log', 'error', 'warn', 'debug'],
   });
 
-  // Phục vụ ảnh upload từ thư mục backend/uploads/ tại http://host:3000/uploads/...
+  const config = app.get(ConfigService);
+  const isProd =
+    config.get<string>('NODE_ENV', 'development') === 'production';
+
+  if (isProd) {
+    const secret = config.get<string>('JWT_SECRET', '');
+    if (
+      !secret ||
+      secret.includes('change_me') ||
+      secret.includes('dev_secret') ||
+      secret.length < 32
+    ) {
+      throw new Error(
+        'Production yêu cầu JWT_SECRET mạnh (≥32 ký tự, không dùng giá trị mẫu).',
+      );
+    }
+    const smtpHost = config.get<string>('SMTP_HOST', '').trim();
+    const smtpUser = config.get<string>('SMTP_USER', '').trim();
+    const smtpPass = config.get<string>('SMTP_PASS', '').trim();
+    if (!smtpHost || !smtpUser || !smtpPass) {
+      throw new Error(
+        'Production yêu cầu cấu hình SMTP_HOST / SMTP_USER / SMTP_PASS.',
+      );
+    }
+    const corsOrigins = config.get<string>('CORS_ORIGINS', '').trim();
+    if (!corsOrigins) {
+      throw new Error(
+        'Production yêu cầu CORS_ORIGINS (danh sách origin cách nhau bởi dấu phẩy).',
+      );
+    }
+  }
+
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
+
   ensureProductUploadDir();
   ensureChatUploadDir();
   ensureOrderUploadDir();
@@ -24,10 +62,19 @@ async function bootstrap() {
     prefix: '/uploads/',
   });
 
-  app.enableCors({
-    origin: true,
-    credentials: true,
-  });
+  const corsRaw = config.get<string>('CORS_ORIGINS', '').trim();
+  if (corsRaw) {
+    const allowlist = corsRaw.split(',').map((o) => o.trim()).filter(Boolean);
+    app.enableCors({
+      origin: allowlist,
+      credentials: true,
+    });
+  } else {
+    app.enableCors({
+      origin: true,
+      credentials: true,
+    });
+  }
 
   app.setGlobalPrefix('api');
 
@@ -40,46 +87,55 @@ async function bootstrap() {
     }),
   );
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('SafeMarket API')
-    .setDescription(
-      'API cho hệ thống Marketplace đồ cũ an toàn (eKYC + Trust Score). ' +
-        'KLTN HUFLIT 2026 - Trương Trí Hiền & Lê Tấn Lộc.',
-    )
-    .setVersion('0.1.0')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        in: 'header',
-      },
-      'JWT-auth',
-    )
-    .addTag('auth', 'Đăng ký, đăng nhập, JWT')
-    .addTag('users', 'Hồ sơ người dùng & điểm tín nhiệm')
-    .addTag('ekyc', 'Xác thực danh tính qua FPT.AI')
-    .addTag('products', 'Quản lý sản phẩm rao bán')
-    .addTag('orders', 'Đơn hàng')
-    .addTag('payments', 'Thanh toán (VNPay/MoMo)')
-    .addTag('admin', 'Thống kê & duyệt báo cáo')
-    .addTag('chat', 'Nhắn tin mua bán')
-    .addTag('reviews', 'Đánh giá sau giao dịch')
-    .addTag('reports', 'Báo cáo vi phạm')
-    .build();
+  const enableSwagger =
+    !isProd || config.get<string>('ENABLE_SWAGGER', 'false') === 'true';
+  if (enableSwagger) {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('SafeMarket API')
+      .setDescription(
+        'API cho hệ thống Marketplace đồ cũ an toàn (eKYC + Trust Score). ' +
+          'KLTN HUFLIT 2026 - Trương Trí Hiền & Lê Tấn Lộc.',
+      )
+      .setVersion('0.1.0')
+      .addBearerAuth(
+        {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          in: 'header',
+        },
+        'JWT-auth',
+      )
+      .addTag('auth', 'Đăng ký, đăng nhập, JWT')
+      .addTag('users', 'Hồ sơ người dùng & điểm tín nhiệm')
+      .addTag('ekyc', 'Xác thực danh tính qua FPT.AI')
+      .addTag('products', 'Quản lý sản phẩm rao bán')
+      .addTag('orders', 'Đơn hàng')
+      .addTag('payments', 'Thanh toán (VNPay/MoMo)')
+      .addTag('admin', 'Thống kê & duyệt báo cáo')
+      .addTag('chat', 'Nhắn tin mua bán')
+      .addTag('reviews', 'Đánh giá sau giao dịch')
+      .addTag('reports', 'Báo cáo vi phạm')
+      .build();
 
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, document, {
-    swaggerOptions: { persistAuthorization: true },
-  });
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: { persistAuthorization: true },
+    });
+  }
 
-  const config = app.get(ConfigService);
   const port = parseInt(config.get<string>('PORT', '3000'), 10);
   await app.listen(port);
 
   Logger.log(`SafeMarket API ready at http://localhost:${port}/api`, 'Bootstrap');
-  Logger.log(`Swagger UI:        http://localhost:${port}/api/docs`, 'Bootstrap');
+  if (enableSwagger) {
+    Logger.log(`Swagger UI:        http://localhost:${port}/api/docs`, 'Bootstrap');
+  }
   Logger.log(`Uploads static:    http://localhost:${port}/uploads/`, 'Bootstrap');
+  Logger.log(
+    'HTTPS: terminate TLS tại reverse proxy (Nginx/Caddy), Nest lắng nghe HTTP nội bộ.',
+    'Bootstrap',
+  );
 }
 
 bootstrap();

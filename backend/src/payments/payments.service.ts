@@ -107,6 +107,11 @@ export class PaymentsService {
 
   /** Dev: giả lập thanh toán thành công → escrow Holding. */
   async simulatePayment(orderId: number, buyerId: number) {
+    if (this.config.get<string>('NODE_ENV', 'development') === 'production') {
+      throw new ForbiddenException(
+        'Thanh toán demo không khả dụng trên môi trường production.',
+      );
+    }
     const order = await this.requireOnlineEscrowOrder(orderId, buyerId);
     const product = await this.productRepo.findOne({
       where: { productId: order.productId },

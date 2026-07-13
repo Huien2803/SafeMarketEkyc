@@ -108,6 +108,8 @@ class AdminUserRow {
 
     this.orders = 0,
 
+    this.lockedUntil,
+
   });
 
 
@@ -127,6 +129,9 @@ class AdminUserRow {
   final String rankLevel;
 
   final int orders;
+
+  /// Thời điểm hết hạn đình chỉ tạm thời (null nếu không đình chỉ có hạn).
+  final DateTime? lockedUntil;
 
 
 
@@ -149,6 +154,10 @@ class AdminUserRow {
       rankLevel: json['rankLevel'] as String? ?? 'Bronze',
 
       orders: (json['orders'] as num?)?.toInt() ?? 0,
+
+      lockedUntil: json['lockedUntil'] != null
+          ? DateTime.tryParse(json['lockedUntil'] as String)
+          : null,
 
     );
 
@@ -207,14 +216,12 @@ class AdminService {
 
 
 
-  Map<String, String> get _headers {
-    final token = AuthService.instance.accessToken;
-    return {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      if (token != null) 'Authorization': 'Bearer $token',
-    };
-  }
+  Map<String, String> get _headers => AuthService.instance.authHeaders;
+
+  Future<http.Response> _authGet(Uri uri) =>
+      AuthService.instance.authorizedRequest(
+        (h) => http.get(uri, headers: h).timeout(ApiConfig.timeout),
+      );
 
   String _errorFromResponse(http.Response res, String fallback) {
     try {
@@ -232,7 +239,7 @@ class AdminService {
 
   Future<AdminStats> getStats() async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/admin/stats');
-    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await _authGet(uri);
     if (res.statusCode == 401) {
       throw Exception('Phiên đăng nhập hết hạn — vui lòng đăng nhập lại');
     }
@@ -356,6 +363,34 @@ class AdminService {
 
 
 
+  Future<void> warnUser(int userId, {String reason = 'Vi phạm quy định'}) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/warn');
+    final res = await http
+        .post(uri, headers: _headers, body: jsonEncode({'reason': reason}))
+        .timeout(ApiConfig.timeout);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception(_errorFromResponse(res, 'Không gửi được cảnh cáo'));
+    }
+  }
+
+  Future<void> suspendUser(
+    int userId, {
+    required int days,
+    String reason = 'Vi phạm quy định',
+  }) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/suspend');
+    final res = await http
+        .post(
+          uri,
+          headers: _headers,
+          body: jsonEncode({'days': days, 'reason': reason}),
+        )
+        .timeout(ApiConfig.timeout);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception(_errorFromResponse(res, 'Không đình chỉ được tài khoản'));
+    }
+  }
+
   Future<void> lockUser(int userId, {String reason = 'Vi phạm'}) async {
 
     final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/lock');
@@ -402,12 +437,19 @@ class AdminService {
     }
   }
 
-  Future<void> deleteUser(int userId) async {
+  /// Xóa tài khoản. Trả về `'hard'` nếu xóa cứng hoàn toàn, `'soft'` nếu
+  /// xóa mềm (ẩn danh + ẩn sản phẩm, giữ lịch sử giao dịch).
+  Future<String> deleteUser(int userId) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/delete');
     final res = await http.post(uri, headers: _headers).timeout(ApiConfig.timeout);
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không xóa được tài khoản'));
     }
+    try {
+      final body = jsonDecode(res.body);
+      if (body is Map && body['mode'] is String) return body['mode'] as String;
+    } catch (_) {}
+    return 'hard';
   }
 
 
@@ -452,6 +494,83 @@ class AdminService {
 
     }
 
+  }
+
+  Future<List<Map<String, dynamic>>> getDisputes() async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/disputes');
+    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
+    if (res.statusCode != 200) return [];
+    return (jsonDecode(res.body) as List<dynamic>)
+        .map((e) => e as Map<String, dynamic>)
+        .toList();
+  }
+
+  Future<void> resolveDispute(
+    int orderId, {
+    required String decision,
+    String? note,
+    int penaltyPoints = 50,
+    bool skipPenalty = false,
+  }) async {
+    final uri =
+        Uri.parse('${ApiConfig.baseUrl}/admin/disputes/$orderId/resolve');
+    final res = await http
+        .post(
+          uri,
+          headers: _headers,
+          body: jsonEncode({
+            'decision': decision,
+            if (note != null && note.isNotEmpty) 'note': note,
+            'penaltyPoints': penaltyPoints,
+            'skipPenalty': skipPenalty,
+          }),
+        )
+        .timeout(ApiConfig.timeout);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception(_errorFromResponse(res, 'Không xử lý được khiếu nại'));
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getWithdrawals({
+    String status = 'Pending',
+  }) async {
+    final uri = Uri.parse(
+      '${ApiConfig.baseUrl}/admin/withdrawals?status=$status',
+    );
+    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
+    if (res.statusCode != 200) return [];
+    return (jsonDecode(res.body) as List<dynamic>)
+        .map((e) => e as Map<String, dynamic>)
+        .toList();
+  }
+
+  Future<void> approveWithdrawal(int id, {String? note}) async {
+    final uri =
+        Uri.parse('${ApiConfig.baseUrl}/admin/withdrawals/$id/approve');
+    final res = await http
+        .post(
+          uri,
+          headers: _headers,
+          body: jsonEncode({if (note != null) 'note': note}),
+        )
+        .timeout(ApiConfig.timeout);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception(_errorFromResponse(res, 'Không duyệt được lệnh rút'));
+    }
+  }
+
+  Future<void> rejectWithdrawal(int id, {String? note}) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/withdrawals/$id/reject');
+    final res = await http
+        .post(
+          uri,
+          headers: _headers,
+          body: jsonEncode({if (note != null) 'note': note}),
+        )
+        .timeout(ApiConfig.timeout);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception(_errorFromResponse(res, 'Không từ chối được lệnh rút'));
+    }
   }
 
 }

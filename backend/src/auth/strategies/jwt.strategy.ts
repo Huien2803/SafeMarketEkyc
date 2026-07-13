@@ -32,6 +32,20 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     if (!user) {
       throw new UnauthorizedException('Token không hợp lệ');
     }
+
+    // Đình chỉ tạm thời đã hết hạn -> tự khôi phục Active.
+    if (
+      user.accountStatus === 'Locked' &&
+      user.lockedUntil &&
+      user.lockedUntil.getTime() <= Date.now()
+    ) {
+      user.accountStatus = 'Active';
+      user.lockReason = null;
+      user.lockedAt = null;
+      user.lockedUntil = null;
+      await this.userRepo.save(user);
+    }
+
     if (user.accountStatus !== 'Active') {
       throw new UnauthorizedException(
         `Tài khoản đang ở trạng thái ${user.accountStatus}`,

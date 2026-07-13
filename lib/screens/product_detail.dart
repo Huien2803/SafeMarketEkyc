@@ -102,6 +102,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       message: 'Đăng nhập để đặt mua sản phẩm này.',
     );
     if (!ok || !mounted) return;
+    final verified = await ensureEkycVerified(
+      context,
+      message: 'Bạn cần xác thực danh tính (eKYC) trước khi mua hàng.',
+    );
+    if (!verified || !mounted) return;
     if (AuthService.instance.currentUser?.userId == p.seller.userId) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

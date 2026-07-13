@@ -33,20 +33,14 @@ class PaymentService {
   PaymentService._();
   static final PaymentService instance = PaymentService._();
 
-  Map<String, String> get _headers {
-    final token = AuthService.instance.accessToken;
-    return {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      if (token != null) 'Authorization': 'Bearer $token',
-    };
-  }
+  Map<String, String> get _headers => AuthService.instance.authHeaders;
 
   Future<PaymentCheckoutResult> checkout(int orderId) async {
     final uri =
         Uri.parse('${ApiConfig.baseUrl}/payments/orders/$orderId/checkout');
-    final res =
-        await http.post(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await AuthService.instance.authorizedRequest(
+      (h) => http.post(uri, headers: h).timeout(ApiConfig.timeout),
+    );
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     if (res.statusCode >= 200 && res.statusCode < 300) {
       return PaymentCheckoutResult.fromJson(body);
@@ -60,8 +54,9 @@ class PaymentService {
   Future<void> simulatePay(int orderId) async {
     final uri =
         Uri.parse('${ApiConfig.baseUrl}/payments/orders/$orderId/simulate-pay');
-    final res =
-        await http.post(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await AuthService.instance.authorizedRequest(
+      (h) => http.post(uri, headers: h).timeout(ApiConfig.timeout),
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       throw Exception(body['message'] ?? 'Thanh toán demo thất bại');
