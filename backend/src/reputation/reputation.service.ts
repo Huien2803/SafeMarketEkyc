@@ -52,20 +52,34 @@ export class ReputationService {
     const score = await this.ensureScore(userId);
     const min = opts?.min ?? 0;
     const max = opts?.max ?? 1000;
-    const next = Math.min(max, Math.max(min, score.currentPoint + delta));
-    score.currentPoint = next;
-    score.rankLevel = this.rankFor(next);
-    await this.scoreRepo.save(score);
+    // Clamp delta để sau trigger không vượt biên (trigger DB cũng clamp 0–1000).
+    const appliedDelta =
+      score.currentPoint + delta < min
+        ? min - score.currentPoint
+        : score.currentPoint + delta > max
+          ? max - score.currentPoint
+          : delta;
+
+    if (appliedDelta === 0) {
+      return {
+        trustScore: score.currentPoint,
+        rankLevel: score.rankLevel,
+        applied: false,
+      };
+    }
+
+    // Chỉ insert log — trigger SQL cập nhật Scores (tránh trừ/cộng 2 lần).
     await this.pointLogRepo.save({
       userId,
-      delta,
+      delta: appliedDelta,
       reasonCode,
       note,
     });
 
+    const refreshed = await this.ensureScore(userId);
     return {
-      trustScore: next,
-      rankLevel: score.rankLevel,
+      trustScore: refreshed.currentPoint,
+      rankLevel: refreshed.rankLevel,
       applied: true,
     };
   }

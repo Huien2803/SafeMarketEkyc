@@ -47,3 +47,11 @@ lerna-debug.log*
 # Ảnh upload thật — không commit file ảnh user
 /uploads/products/*
 !/uploads/products/.gitkeep
+/uploads/ekyc/*
+!/uploads/ekyc/.gitkeep
+/uploads/orders/*
+!/uploads/orders/.gitkeep
+/uploads/avatars/*
+!/uploads/avatars/.gitkeep
+/uploads/chat/*
+!/uploads/chat/.gitkeep

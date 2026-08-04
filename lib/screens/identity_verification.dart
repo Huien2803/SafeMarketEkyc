@@ -9,12 +9,10 @@ import 'package:safemarket_app/screens/liveness_challenge_screen.dart';
 import 'package:safemarket_app/services/auth_service.dart';
 import 'package:safemarket_app/services/ekyc_service.dart';
 
-/// Màn hình xác thực danh tính (eKYC) - các bước:
-///   1. intro:        hướng dẫn chuẩn bị
-///   2. frontIdCard:  chụp mặt trước CCCD -> FPT.AI OCR
-///   3. backIdCard:   chụp mặt sau CCCD -> FPT.AI OCR
-///   4. liveness:     xác minh khuôn mặt thật + LẤY ĐIỂM NHẬN DẠNG -> submit
-///   -> result
+/// Màn hình xác thực danh tính (eKYC) — chuẩn ngân hàng / VNeID (3 bước):
+///   1. mặt trước CCCD (OCR, khóa số/họ tên)
+///   2. mặt sau CCCD (ngày cấp / nơi cấp bắt buộc)
+///   3. Face ID (liveness) + so khớp khuôn mặt với CCCD → nộp hồ sơ
 enum _EkycStep { intro, frontIdCard, backIdCard, liveness, result }
 
 class IdentityVerificationScreen extends StatefulWidget {
@@ -62,6 +60,7 @@ class _IdentityVerificationScreenState
   }
 
   // Dữ liệu giữa các bước
+  String? _sessionId;
   File? _frontFile;
   File? _backFile;
   File? _faceFile;
@@ -70,6 +69,8 @@ class _IdentityVerificationScreenState
   EkycStatus? _finalStatus;
   String? _livenessToken;
   int? _recognitionPoints;
+  FaceMatchResult? _faceMatch;
+  bool _faceVerified = false;
 
   @override
   Widget build(BuildContext context) {
@@ -112,54 +113,58 @@ class _IdentityVerificationScreenState
     }
     switch (_step) {
       case _EkycStep.intro:
-        return _IntroView(onStart: () => _setStep(_EkycStep.frontIdCard));
+        return _IntroView(onStart: _beginSession, busy: _busy, errorMessage: _errorMessage);
       case _EkycStep.frontIdCard:
         return _CaptureView(
           stepIndex: 1,
           totalSteps: 3,
-          title: 'Chụp MẶT TRƯỚC CCCD',
+          title: 'Bước 1 — Mặt trước CCCD',
           subtitle:
-              'Đặt CCCD trong khung, đảm bảo rõ ảnh và 4 góc. Tránh lóa sáng.',
+              'Chụp bản gốc, đủ 4 góc, rõ ảnh chân dung & mã QR. Tránh lóa/mờ. '
+              'Số CCCD và họ tên do hệ thống khóa từ OCR.',
           icon: Icons.credit_card,
           selectedFile: _frontFile,
           busy: _busy,
           errorMessage: _errorMessage,
           dataPreview: _frontData == null
               ? null
-              : _FrontDataPreview(data: _frontData!),
-          primaryLabel: _frontData == null ? 'Quét bằng FPT.AI' : 'Tiếp tục',
+              : _FrontDataPreview(
+                  data: _frontData!,
+                  onChanged: (next) => setState(() => _frontData = next),
+                ),
+          primaryLabel: _frontData == null ? 'Quét CCCD (OCR)' : 'Tiếp tục',
           onTakePhoto: () => _pickImage(ImageSource.camera, _setFront),
           onPickGallery: () => _pickImage(ImageSource.gallery, _setFront),
-          onPrimary: _frontData == null
-              ? _scanFront
-              : () => _setStep(_EkycStep.backIdCard),
+          onPrimary: _frontData == null ? _scanFront : _continueFromFront,
         );
       case _EkycStep.backIdCard:
         return _CaptureView(
           stepIndex: 2,
           totalSteps: 3,
-          title: 'Chụp MẶT SAU CCCD',
-          subtitle: 'Đặt mặt sau (có MRZ + ngày cấp) trong khung.',
+          title: 'Bước 2 — Mặt sau CCCD',
+          subtitle:
+              'Chụp mặt sau: ngày cấp, nơi cấp, đặc điểm / MRZ phải đọc được.',
           icon: Icons.credit_card_outlined,
           selectedFile: _backFile,
           busy: _busy,
           errorMessage: _errorMessage,
           dataPreview:
               _backData == null ? null : _BackDataPreview(data: _backData!),
-          primaryLabel: _backData == null ? 'Quét bằng FPT.AI' : 'Tiếp tục',
+          primaryLabel: _backData == null ? 'Quét CCCD (OCR)' : 'Tiếp tục',
           onTakePhoto: () => _pickImage(ImageSource.camera, _setBack),
           onPickGallery: () => _pickImage(ImageSource.gallery, _setBack),
-          onPrimary: _backData == null
-              ? _scanBack
-              : () => _setStep(_EkycStep.liveness),
+          onPrimary: _backData == null ? _scanBack : _continueFromBack,
         );
       case _EkycStep.liveness:
         return _LivenessStartView(
+          stepIndex: 3,
+          totalSteps: 3,
           busy: _busy,
           errorMessage: _errorMessage,
-          passed: _recognitionPoints != null,
+          passed: _faceVerified,
           pointCount: _recognitionPoints,
           faceFile: _faceFile,
+          faceMatch: _faceMatch,
           onStart: _startLiveness,
           onContinue: _submit,
         );
@@ -208,12 +213,23 @@ class _IdentityVerificationScreenState
     try {
       final picked = await _picker.pickImage(
         source: source,
-        imageQuality: 80,
-        maxWidth: 1600,
+        imageQuality: 90,
+        maxWidth: 1920,
+        maxHeight: 1920,
         preferredCameraDevice:
             preferFront ? CameraDevice.front : CameraDevice.rear,
+        requestFullMetadata: false,
       );
       if (picked == null) return;
+      final path = picked.path.toLowerCase();
+      if (path.endsWith('.heic') || path.endsWith('.heif')) {
+        _showError(
+          'Định dạng HEIC không hỗ trợ OCR tốt. '
+          'Vào Cài đặt máy ảnh → tắt “High efficiency/HEIC”, '
+          'hoặc chọn ảnh JPEG từ album rồi thử lại.',
+        );
+        return;
+      }
       setter(File(picked.path));
     } catch (e) {
       _showError('Không mở được camera/album: $e');
@@ -223,16 +239,46 @@ class _IdentityVerificationScreenState
   void _setFront(File f) => setState(() {
         _frontFile = f;
         _frontData = null;
+        _backData = null;
+        _faceVerified = false;
+        _faceMatch = null;
+        _livenessToken = null;
+        _recognitionPoints = null;
         _errorMessage = null;
       });
 
   void _setBack(File f) => setState(() {
         _backFile = f;
         _backData = null;
+        _faceVerified = false;
+        _faceMatch = null;
+        _livenessToken = null;
+        _recognitionPoints = null;
         _errorMessage = null;
       });
 
   // ------------------- API calls -------------------
+
+  Future<void> _beginSession() async {
+    await _runApi(() async {
+      _sessionId = await EkycService.instance.startSession();
+      _frontFile = null;
+      _backFile = null;
+      _faceFile = null;
+      _frontData = null;
+      _backData = null;
+      _livenessToken = null;
+      _recognitionPoints = null;
+      _faceMatch = null;
+      _faceVerified = false;
+      _step = _EkycStep.frontIdCard;
+    });
+  }
+
+  Future<void> _ensureSession() async {
+    if (_sessionId != null && _sessionId!.isNotEmpty) return;
+    _sessionId = await EkycService.instance.startSession();
+  }
 
   Future<void> _scanFront() async {
     if (_frontFile == null) {
@@ -240,7 +286,14 @@ class _IdentityVerificationScreenState
       return;
     }
     await _runApi(() async {
-      _frontData = await EkycService.instance.scanIdFront(_frontFile!);
+      await _ensureSession();
+      _frontData = await EkycService.instance.scanIdFront(
+        sessionId: _sessionId!,
+        image: _frontFile!,
+      );
+      _faceVerified = false;
+      _faceMatch = null;
+      _livenessToken = null;
     });
   }
 
@@ -250,45 +303,106 @@ class _IdentityVerificationScreenState
       return;
     }
     await _runApi(() async {
-      _backData = await EkycService.instance.scanIdBack(_backFile!);
+      await _ensureSession();
+      _backData = await EkycService.instance.scanIdBack(
+        sessionId: _sessionId!,
+        image: _backFile!,
+      );
+      final err = _backData!.validateBack();
+      if (err != null) {
+        _backData = null;
+        throw AuthException(err);
+      }
+      _faceVerified = false;
+      _faceMatch = null;
+      _livenessToken = null;
     });
   }
 
-  /// Mở màn xác minh khuôn mặt động (Face ID xoay mặt). Khi đạt, hệ thống
-  /// đã LẤY ĐIỂM NHẬN DẠNG khuôn mặt (facial landmarks) thay cho việc so khớp
-  /// với ảnh trên CCCD.
+  /// Face ID trên thiết bị → đăng ký token server → so khớp với ảnh CCCD.
   Future<void> _startLiveness() async {
-    setState(() => _errorMessage = null);
+    setState(() {
+      _errorMessage = null;
+      _faceVerified = false;
+      _faceMatch = null;
+      _livenessToken = null;
+    });
     final result = await Navigator.of(context).push<LivenessResult>(
       MaterialPageRoute(builder: (_) => const LivenessChallengeScreen()),
     );
     if (!mounted || result == null) return;
-    setState(() {
+
+    await _runApi(() async {
+      await _ensureSession();
+      final live = await EkycService.instance.completeLiveness(
+        sessionId: _sessionId!,
+        selfie: result.selfieFile,
+        recognitionPoints: result.pointCount,
+      );
+      final match = await EkycService.instance.faceMatch(
+        sessionId: _sessionId!,
+        idCard: _frontFile,
+        selfie: result.selfieFile,
+      );
+      if (!match.isMatch) {
+        throw AuthException(
+          match.message.isNotEmpty
+              ? match.message
+              : 'Khuôn mặt không khớp ảnh trên CCCD. Thử lại Face ID.',
+        );
+      }
       _faceFile = result.selfieFile;
-      _livenessToken = result.token;
-      _recognitionPoints = result.pointCount;
-      _errorMessage = null;
+      _livenessToken = live.livenessToken;
+      _recognitionPoints = live.recognitionPoints;
+      _faceMatch = match;
+      _faceVerified = true;
       _step = _EkycStep.liveness;
     });
   }
 
+  void _continueFromFront() {
+    final err = _frontData?.validateProfile();
+    if (err != null) {
+      _showError(err);
+      return;
+    }
+    _setStep(_EkycStep.backIdCard);
+  }
+
+  void _continueFromBack() {
+    final err = _backData?.validateBack();
+    if (err != null) {
+      _showError(err);
+      return;
+    }
+    _setStep(_EkycStep.liveness);
+  }
+
   Future<void> _submit() async {
-    if (_frontData == null ||
+    if (_sessionId == null ||
         _livenessToken == null ||
-        _recognitionPoints == null) {
-      _showError('Thiếu dữ liệu để submit eKYC (cần hoàn tất xác minh khuôn mặt)');
+        !_faceVerified ||
+        _frontData == null) {
+      _showError(
+        'Chưa hoàn tất Face ID / so khớp khuôn mặt. Vui lòng xác minh lại.',
+      );
+      return;
+    }
+    final profileErr = _frontData!.validateProfile();
+    if (profileErr != null) {
+      setState(() {
+        _errorMessage = profileErr;
+        _step = _EkycStep.frontIdCard;
+      });
       return;
     }
     await _runApi(() async {
       _finalStatus = await EkycService.instance.submit(
-        idNumber: _frontData!.idNumber,
-        fullName: _frontData!.fullName,
-        dob: _frontData!.dobIso,
-        address: _frontData!.address.isNotEmpty
-            ? _frontData!.address
-            : _frontData!.home,
-        recognitionPoints: _recognitionPoints!,
+        sessionId: _sessionId!,
         livenessToken: _livenessToken!,
+        dob: _frontData!.dobIso,
+        address: _frontData!.resolvedAddress,
+        home: _frontData!.home,
       );
       _step = _EkycStep.result;
     });
@@ -321,8 +435,14 @@ class _IdentityVerificationScreenState
 // ====================================================================
 
 class _IntroView extends StatelessWidget {
-  const _IntroView({required this.onStart});
+  const _IntroView({
+    required this.onStart,
+    required this.busy,
+    this.errorMessage,
+  });
   final VoidCallback onStart;
+  final bool busy;
+  final String? errorMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -338,9 +458,27 @@ class _IntroView extends StatelessWidget {
                 _PhoneIllustration(),
                 const SizedBox(height: 32),
                 const Text(
-                  'Bạn cần chuẩn bị:',
+                  'Xác thực theo chuẩn eKYC',
                   style: TextStyle(
                     fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  '3 bước: CCCD mặt trước → mặt sau → Face ID & so khớp khuôn mặt rồi nộp hồ sơ.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.45,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Bạn cần chuẩn bị:',
+                  style: TextStyle(
+                    fontSize: 16,
                     fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary,
                   ),
@@ -348,17 +486,21 @@ class _IntroView extends StatelessWidget {
                 const SizedBox(height: 16),
                 const _PreparationCard(
                   icon: Icons.shield,
-                  title: 'Căn cước công dân',
-                  subtitle: 'Bản gốc, còn hạn sử dụng',
+                  title: 'Căn cước công dân bản gốc',
+                  subtitle: 'Còn hạn, đủ 4 góc, hiện rõ mã QR',
                 ),
                 const SizedBox(height: 12),
                 const _PreparationCard(
                   icon: Icons.person_outline,
                   title: 'Khuôn mặt chính chủ',
-                  subtitle: 'Không đeo kính, khẩu trang',
+                  subtitle: 'Đủ sáng — không khẩu trang / mũ / kính đen',
                 ),
                 const SizedBox(height: 24),
                 _SecurityNoticeBox(),
+                if (errorMessage != null) ...[
+                  const SizedBox(height: 16),
+                  _ErrorBox(message: errorMessage!),
+                ],
                 const SizedBox(height: 24),
               ],
             ),
@@ -369,8 +511,18 @@ class _IntroView extends StatelessWidget {
           child: SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: onStart,
-              child: const Text('Xác thực ngay'),
+              onPressed: busy ? null : onStart,
+              child: busy
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        valueColor:
+                            AlwaysStoppedAnimation<Color>(AppColors.white),
+                      ),
+                    )
+                  : const Text('Bắt đầu xác thực'),
             ),
           ),
         ),
@@ -555,9 +707,57 @@ class _PhotoPreview extends StatelessWidget {
   }
 }
 
-class _FrontDataPreview extends StatelessWidget {
-  const _FrontDataPreview({required this.data});
+class _FrontDataPreview extends StatefulWidget {
+  const _FrontDataPreview({required this.data, required this.onChanged});
   final IdCardFront data;
+  final ValueChanged<IdCardFront> onChanged;
+
+  @override
+  State<_FrontDataPreview> createState() => _FrontDataPreviewState();
+}
+
+class _FrontDataPreviewState extends State<_FrontDataPreview> {
+  late final TextEditingController _dob;
+  late final TextEditingController _home;
+  late final TextEditingController _address;
+
+  @override
+  void initState() {
+    super.initState();
+    _dob = TextEditingController(text: widget.data.dob);
+    _home = TextEditingController(text: widget.data.home);
+    _address = TextEditingController(text: widget.data.address);
+  }
+
+  @override
+  void didUpdateWidget(covariant _FrontDataPreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.data != widget.data) {
+      _dob.text = widget.data.dob;
+      _home.text = widget.data.home;
+      _address.text = widget.data.address;
+    }
+  }
+
+  @override
+  void dispose() {
+    _dob.dispose();
+    _home.dispose();
+    _address.dispose();
+    super.dispose();
+  }
+
+  void _emit() {
+    widget.onChanged(
+      widget.data.copyWith(
+        dob: _dob.text.trim(),
+        home: _home.text.trim(),
+        address: _address.text.trim(),
+      ),
+    );
+  }
+
+  bool get _hasMissing => widget.data.validateProfile() != null;
 
   @override
   Widget build(BuildContext context) {
@@ -571,23 +771,72 @@ class _FrontDataPreview extends StatelessWidget {
             children: const [
               Icon(Icons.check_circle, color: AppColors.trustGreen, size: 20),
               SizedBox(width: 8),
-              Text(
-                'FPT.AI đã nhận diện CCCD',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.trustGreen,
+              Expanded(
+                child: Text(
+                  'Đã nhận diện CCCD — kiểm tra & bổ sung nếu thiếu',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.trustGreen,
+                  ),
                 ),
               ),
             ],
           ),
+          if (_hasMissing) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Thiếu một số dòng (OCR/QR chưa đọc hết). '
+              'Địa chỉ thường trú bắt buộc — quê quán có thể nhập tay. '
+              'Chụp rõ mã QR góc phải CCCD để tự điền địa chỉ tốt hơn.',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.orange.shade800,
+                height: 1.35,
+              ),
+            ),
+          ],
           const Divider(height: 20),
-          _KvRow(label: 'Số CCCD', value: data.idNumber),
-          _KvRow(label: 'Họ và tên', value: data.fullName),
-          _KvRow(label: 'Ngày sinh', value: data.dob),
-          _KvRow(label: 'Giới tính', value: data.sex),
-          _KvRow(label: 'Quê quán', value: data.home),
-          _KvRow(label: 'Địa chỉ', value: data.address),
+          _KvRow(label: 'Số CCCD (khóa OCR)', value: widget.data.idNumber),
+          _KvRow(label: 'Họ và tên (khóa OCR)', value: widget.data.fullName),
+          _KvRow(label: 'Giới tính', value: widget.data.sex),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _dob,
+            decoration: const InputDecoration(
+              labelText: 'Ngày sinh (dd/MM/yyyy) *',
+              hintText: '04/07/2005',
+              isDense: true,
+              border: OutlineInputBorder(),
+            ),
+            keyboardType: TextInputType.datetime,
+            onChanged: (_) => _emit(),
+            onEditingComplete: _emit,
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _home,
+            decoration: const InputDecoration(
+              labelText: 'Quê quán',
+              isDense: true,
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (_) => _emit(),
+            onEditingComplete: _emit,
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _address,
+            decoration: const InputDecoration(
+              labelText: 'Địa chỉ thường trú *',
+              hintText: 'Số nhà, đường, phường/xã, tỉnh/thành',
+              isDense: true,
+              border: OutlineInputBorder(),
+            ),
+            maxLines: 2,
+            onChanged: (_) => _emit(),
+            onEditingComplete: _emit,
+          ),
         ],
       ),
     );
@@ -633,20 +882,26 @@ class _BackDataPreview extends StatelessWidget {
 
 class _LivenessStartView extends StatelessWidget {
   const _LivenessStartView({
+    required this.stepIndex,
+    required this.totalSteps,
     required this.busy,
     required this.errorMessage,
     required this.passed,
     required this.pointCount,
     required this.faceFile,
+    required this.faceMatch,
     required this.onStart,
     required this.onContinue,
   });
 
+  final int stepIndex;
+  final int totalSteps;
   final bool busy;
   final String? errorMessage;
   final bool passed;
   final int? pointCount;
   final File? faceFile;
+  final FaceMatchResult? faceMatch;
   final VoidCallback onStart;
   final VoidCallback onContinue;
 
@@ -654,7 +909,7 @@ class _LivenessStartView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        const _StepProgress(current: 3, total: 3),
+        _StepProgress(current: stepIndex, total: totalSteps),
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -663,7 +918,7 @@ class _LivenessStartView extends StatelessWidget {
               children: [
                 const SizedBox(height: 12),
                 const Text(
-                  'XÁC MINH KHUÔN MẶT & LẤY ĐIỂM NHẬN DẠNG',
+                  'Bước 3 — Face ID, so khớp & nộp hồ sơ',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
@@ -672,22 +927,22 @@ class _LivenessStartView extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Hệ thống sẽ yêu cầu bạn nhìn thẳng rồi quay đầu theo hướng dẫn '
-                  '(giống Face ID) để lấy các điểm nhận dạng trên khuôn mặt. '
-                  'Ảnh tĩnh hoặc đồ vật sẽ không thể vượt qua.',
+                  'Xoay mặt theo hướng dẫn để chứng minh khuôn mặt thật, '
+                  'hệ thống so khớp với ảnh trên CCCD, rồi nộp hồ sơ chờ duyệt.',
                   style: TextStyle(
                     fontSize: 13,
                     height: 1.5,
                     color: AppColors.textSecondary,
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
                 AspectRatio(
-                  aspectRatio: 16 / 11,
+                  aspectRatio: 3 / 4,
                   child: Container(
                     decoration: BoxDecoration(
-                      color: const Color(0xFFE3EDFF),
+                      color: AppColors.white,
                       borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE5E7EB)),
                     ),
                     clipBehavior: Clip.antiAlias,
                     child: (passed && faceFile != null)
@@ -721,33 +976,49 @@ class _LivenessStartView extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: AppDecorations.card(),
-                    child: Row(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.fingerprint,
-                            color: AppColors.trustGreen, size: 28),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Đã lấy điểm nhận dạng khuôn mặt',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.trustGreen,
-                                ),
+                        Row(
+                          children: [
+                            const Icon(Icons.verified_user,
+                                color: AppColors.trustGreen, size: 28),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Đã xác minh khuôn mặt sống + khớp CCCD',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.trustGreen,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Điểm nhận dạng: ${pointCount ?? 0}'
+                                    '${faceMatch != null ? ' · Độ khớp: ${(faceMatch!.similarity * 100).toStringAsFixed(0)}%' : ''}',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: AppColors.textSecondary,
+                                    ),
+                                  ),
+                                  if (faceMatch?.message.isNotEmpty == true) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      faceMatch!.message,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: AppColors.textSecondary,
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Thu được ${pointCount ?? 0} điểm nhận dạng',
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: AppColors.textSecondary,
-                                ),
-                              ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -779,8 +1050,8 @@ class _LivenessStartView extends StatelessWidget {
                       ),
                     )
                   : Text(passed
-                      ? 'Hoàn tất xác thực'
-                      : 'Bắt đầu xác minh khuôn mặt'),
+                      ? 'Nộp hồ sơ xác thực'
+                      : 'Bắt đầu Face ID'),
             ),
           ),
         ),

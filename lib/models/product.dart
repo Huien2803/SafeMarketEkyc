@@ -129,7 +129,16 @@ class ProductDetail {
 
   bool get isAvailable => status == 'Available';
   bool get isSold => status == 'Sold';
+  bool get isReserved => status == 'Reserved';
   bool get isPurchasable => status == 'Available';
+
+  /// Nhãn nút mua / thông báo khi không mua được.
+  String get purchaseBlockedLabel {
+    if (isSold) return 'Đã bán';
+    if (isReserved) return 'Đã có người đặt';
+    if (status == 'Hidden') return 'Không khả dụng';
+    return 'Không khả dụng';
+  }
 }
 
 class ProductCategory {

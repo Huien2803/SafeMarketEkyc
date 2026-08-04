@@ -36,11 +36,61 @@ class IdCardFront {
         type: (json['type'] ?? '').toString(),
       );
 
+  IdCardFront copyWith({
+    String? idNumber,
+    String? fullName,
+    String? dob,
+    String? sex,
+    String? nationality,
+    String? home,
+    String? address,
+    String? doe,
+    String? type,
+  }) {
+    return IdCardFront(
+      idNumber: idNumber ?? this.idNumber,
+      fullName: fullName ?? this.fullName,
+      dob: dob ?? this.dob,
+      sex: sex ?? this.sex,
+      nationality: nationality ?? this.nationality,
+      home: home ?? this.home,
+      address: address ?? this.address,
+      doe: doe ?? this.doe,
+      type: type ?? this.type,
+    );
+  }
+
   /// Chuyển dd/MM/yyyy -> yyyy-MM-dd cho backend SubmitEkycDto.
   String get dobIso {
-    final m = RegExp(r'^(\d{1,2})/(\d{1,2})/(\d{4})$').firstMatch(dob);
-    if (m == null) return dob;
+    final trimmed = dob.trim();
+    final m = RegExp(r'^(\d{1,2})/(\d{1,2})/(\d{4})$').firstMatch(trimmed);
+    if (m == null) return trimmed;
     return '${m.group(3)}-${m.group(2)!.padLeft(2, '0')}-${m.group(1)!.padLeft(2, '0')}';
+  }
+
+  /// Địa chỉ gửi backend: ưu tiên thường trú, không có thì dùng quê quán.
+  String get resolvedAddress {
+    final a = address.trim();
+    if (a.isNotEmpty) return a;
+    return home.trim();
+  }
+
+  /// null = hợp lệ; ngược lại là thông báo lỗi tiếng Việt.
+  /// Quê quán không bắt buộc (QR CCCD thường không có quê quán).
+  String? validateProfile() {
+    final d = dob.trim();
+    if (d.isEmpty) {
+      return 'Thiếu ngày sinh. Nhập ngày sinh dạng dd/MM/yyyy (ví dụ 04/07/2005).';
+    }
+    final okDate = RegExp(r'^(\d{1,2})/(\d{1,2})/(\d{4})$').hasMatch(d) ||
+        RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(d);
+    if (!okDate) {
+      return 'Ngày sinh sai định dạng. Dùng dd/MM/yyyy (ví dụ 04/07/2005).';
+    }
+    if (resolvedAddress.length < 2) {
+      return 'Thiếu địa chỉ thường trú (ít nhất 2 ký tự). Nhập địa chỉ bên dưới.';
+    }
+    return null;
   }
 }
 
@@ -60,6 +110,16 @@ class IdCardBack {
         issueDate: (json['issueDate'] ?? '').toString(),
         issueLoc: (json['issueLoc'] ?? '').toString(),
       );
+
+  String? validateBack() {
+    if (issueDate.trim().isEmpty) {
+      return 'Thiếu ngày cấp mặt sau CCCD. Chụp lại rõ hơn.';
+    }
+    if (issueLoc.trim().isEmpty) {
+      return 'Thiếu nơi cấp mặt sau CCCD. Chụp lại rõ hơn.';
+    }
+    return null;
+  }
 }
 
 class FaceMatchResult {

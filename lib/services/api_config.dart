@@ -25,7 +25,7 @@ class ApiConfig {
   /// IP máy tính trong LAN khi test trên điện thoại thật (cùng WiFi).
   /// Mở CMD gõ `ipconfig` → IPv4 Address. Có thể override bằng --dart-define.
   static const String _lanHost =
-      String.fromEnvironment('API_HOST', defaultValue: '192.168.1.5');
+      String.fromEnvironment('API_HOST', defaultValue: '192.168.1.19');
 
   /// Ép hẳn base URL (ưu tiên cao nhất) qua --dart-define=API_BASE_URL=...
   static const String _override =
@@ -37,11 +37,17 @@ class ApiConfig {
   static String _url(String host) => 'http://$host:$_port/api';
 
   /// Danh sách host ứng viên theo nền tảng (thử theo thứ tự).
+  /// Android (Run từ Android Studio + adb reverse):
+  ///   127.0.0.1 / localhost → máy tính qua `adb reverse tcp:3000`
+  ///   10.0.2.2 → emulator
+  ///   LAN IP → dự phòng nếu WiFi không cách ly
   static List<String> get _candidateHosts {
     if (kIsWeb) return const ['localhost'];
-    if (Platform.isAndroid) return ['10.0.2.2', _lanHost, 'localhost'];
-    if (Platform.isIOS) return ['127.0.0.1', _lanHost, 'localhost'];
-    return ['localhost', _lanHost];
+    if (Platform.isAndroid) {
+      return ['127.0.0.1', 'localhost', '10.0.2.2', _lanHost];
+    }
+    if (Platform.isIOS) return ['127.0.0.1', 'localhost', _lanHost];
+    return ['localhost', '127.0.0.1', _lanHost];
   }
 
   /// Base URL hiện dùng (đồng bộ). Trả về giá trị đã dò nếu có,
@@ -79,7 +85,7 @@ class ApiConfig {
       // GET /api — kể cả 404 vẫn chứng tỏ server phản hồi.
       final res = await http
           .get(Uri.parse(base))
-          .timeout(const Duration(milliseconds: 1500));
+          .timeout(const Duration(milliseconds: 3000));
       return res.statusCode > 0;
     } catch (_) {
       return false;

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:safemarket_app/models/order.dart';
 import 'package:safemarket_app/models/sold_listing.dart';
@@ -136,11 +137,25 @@ class OrderService {
       if (auth != null) req.headers['Authorization'] = auth;
 
       final bytes = await proofImage.readAsBytes();
+      // Android camera thường trả path không có đuôi / mimetype → server từ chối.
+      final rawName = proofImage.name.trim();
+      final lower = rawName.toLowerCase();
+      final hasExt = lower.endsWith('.jpg') ||
+          lower.endsWith('.jpeg') ||
+          lower.endsWith('.png') ||
+          lower.endsWith('.webp');
+      final filename = hasExt ? rawName : 'receipt.jpg';
+      final mime = proofImage.mimeType;
+      final contentType = (mime != null && mime.startsWith('image/'))
+          ? MediaType.parse(mime)
+          : MediaType('image', 'jpeg');
+
       req.files.add(
         http.MultipartFile.fromBytes(
           'proof',
           bytes,
-          filename: proofImage.name.isNotEmpty ? proofImage.name : 'receipt.jpg',
+          filename: filename,
+          contentType: contentType,
         ),
       );
 

@@ -112,9 +112,9 @@ class ProductService {
     );
   }
 
-  /// Đăng bán sản phẩm — ảnh bắt buộc (multipart).
+  /// Đăng bán sản phẩm — ít nhất 1 ảnh, ảnh đầu là ảnh bìa (multipart).
   Future<ProductDetail> createProduct({
-    required XFile image,
+    required List<XFile> images,
     required String title,
     required String description,
     required int price,
@@ -125,6 +125,9 @@ class ProductService {
     final token = AuthService.instance.accessToken;
     if (token == null) {
       throw Exception('Bạn cần đăng nhập để đăng bán');
+    }
+    if (images.isEmpty) {
+      throw Exception('Cần ít nhất 1 ảnh sản phẩm');
     }
 
     final uri = Uri.parse('${ApiConfig.baseUrl}/products');
@@ -137,9 +140,11 @@ class ProductService {
       ..fields['location'] = location
       ..fields['categoryId'] = '$categoryId';
 
-    req.files.add(await _imagePart(image));
+    for (final image in images) {
+      req.files.add(await _imagePart(image));
+    }
 
-    final streamed = await req.send().timeout(const Duration(seconds: 60));
+    final streamed = await req.send().timeout(const Duration(seconds: 120));
     final res = await http.Response.fromStream(streamed);
     final body = res.body.isNotEmpty
         ? jsonDecode(res.body) as Map<String, dynamic>
@@ -229,14 +234,14 @@ class ProductService {
     if (kIsWeb) {
       final bytes = await file.readAsBytes();
       return http.MultipartFile.fromBytes(
-        'image',
+        'images',
         bytes,
         filename: name,
         contentType: mime,
       );
     }
     return http.MultipartFile.fromPath(
-      'image',
+      'images',
       file.path,
       filename: name,
       contentType: mime,

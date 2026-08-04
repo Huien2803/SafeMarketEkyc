@@ -7,21 +7,14 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
 
 /// Kết quả của bước xác minh khuôn mặt sống (active liveness).
+/// Token do server phát sau khi gọi /ekyc/liveness/complete — không mint client.
 class LivenessResult {
   LivenessResult({
     required this.selfieFile,
-    required this.token,
     required this.pointCount,
   });
 
-  /// Ảnh khuôn mặt nhìn thẳng chụp được trong quá trình thử thách.
   final File selfieFile;
-
-  /// Token xác nhận đã vượt qua liveness (gửi kèm khi submit eKYC).
-  final String token;
-
-  /// Số điểm nhận dạng khuôn mặt (facial landmarks) thu được — thay cho
-  /// việc so khớp với ảnh trên CCCD.
   final int pointCount;
 }
 
@@ -234,7 +227,6 @@ class _LivenessChallengeScreenState extends State<LivenessChallengeScreen>
       Navigator.of(context).pop(
         LivenessResult(
           selfieFile: selfie,
-          token: 'live-${DateTime.now().millisecondsSinceEpoch}',
           pointCount: _pointCount,
         ),
       );

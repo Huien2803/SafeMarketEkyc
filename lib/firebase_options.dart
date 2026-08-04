@@ -1,19 +1,17 @@
-// Project: safemarketekyc
-// Realtime Database: https://safemarketekyc-default-rtdb.firebaseio.com/
+// Project: safemarketekyc-38009
+// Realtime Database: https://safemarketekyc-38009-default-rtdb.asia-southeast1.firebasedatabase.app/
 //
-// apiKey + appId: lấy từ Firebase Console → Project settings → Your apps → Android
-// hoặc tải google-services.json thật → android/app/google-services.json
-// rồi chạy: flutterfire configure --project=safemarketekyc --yes
+// Đồng bộ từ android/app/google-services.json (project mới của bạn)
 
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
 
 class DefaultFirebaseOptions {
-  static const String projectId = 'safemarketekyc';
+  static const String projectId = 'safemarketekyc-38009';
   static const String databaseURL =
-      'https://safemarketekyc-default-rtdb.firebaseio.com';
-  static const String storageBucket = 'safemarketekyc.appspot.com';
+      'https://safemarketekyc-38009-default-rtdb.asia-southeast1.firebasedatabase.app';
+  static const String storageBucket = 'safemarketekyc-38009.firebasestorage.app';
 
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) return web;
@@ -27,34 +25,34 @@ class DefaultFirebaseOptions {
     }
   }
 
-  /// Điền apiKey + appId từ google-services.json (client/api_key, mobilesdk_app_id)
-
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyANG0nWA34BBllZqVOrXsL4eEjBKkDG-uc',
-    appId: '1:968535993886:android:9f7ca688df4c5627d6880f',
-    messagingSenderId: '968535993886',
-    projectId: 'safemarketekyc',
-    databaseURL: 'https://safemarketekyc-default-rtdb.firebaseio.com',
-    storageBucket: 'safemarketekyc.firebasestorage.app',
+    apiKey: 'AIzaSyCnf4WljQz31GFOXHQYX_H49jZ1zK7_HXc',
+    appId: '1:833721447738:android:566f802cde298e4e504c03',
+    messagingSenderId: '833721447738',
+    projectId: 'safemarketekyc-38009',
+    databaseURL:
+        'https://safemarketekyc-38009-default-rtdb.asia-southeast1.firebasedatabase.app',
+    storageBucket: 'safemarketekyc-38009.firebasestorage.app',
   );
+
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyPLACEHOLDER_REPLACE_FROM_CONSOLE',
-    appId: '1:PLACEHOLDER:ios:PLACEHOLDER',
-    messagingSenderId: 'PLACEHOLDER_SENDER_ID',
+    apiKey: 'AIzaSyCnf4WljQz31GFOXHQYX_H49jZ1zK7_HXc',
+    appId: '1:833721447738:android:566f802cde298e4e504c03',
+    messagingSenderId: '833721447738',
     projectId: projectId,
     databaseURL: databaseURL,
-    storageBucket: storageBucket,
+    storageBucket: 'safemarketekyc-38009.firebasestorage.app',
     iosBundleId: 'com.example.safemarketApp',
   );
 
   /// Web/Chrome: dùng cùng key Android (đủ cho Realtime Database demo).
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyANG0nWA34BBllZqVOrXsL4eEjBKkDG-uc',
-    appId: '1:968535993886:android:9f7ca688df4c5627d6880f',
-    messagingSenderId: '968535993886',
+    apiKey: 'AIzaSyCnf4WljQz31GFOXHQYX_H49jZ1zK7_HXc',
+    appId: '1:833721447738:android:566f802cde298e4e504c03',
+    messagingSenderId: '833721447738',
     projectId: projectId,
     databaseURL: databaseURL,
-    authDomain: 'safemarketekyc.firebaseapp.com',
-    storageBucket: 'safemarketekyc.firebasestorage.app',
+    authDomain: 'safemarketekyc-38009.firebaseapp.com',
+    storageBucket: 'safemarketekyc-38009.firebasestorage.app',
   );
 }

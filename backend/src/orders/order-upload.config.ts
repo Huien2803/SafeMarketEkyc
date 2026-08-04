@@ -31,11 +31,21 @@ export function orderProofFilter(
   file: Express.Multer.File,
   cb: (error: Error | null, acceptFile: boolean) => void,
 ): void {
-  if (!file.mimetype.startsWith('image/')) {
-    cb(new BadRequestException('Chỉ chấp nhận file ảnh'), false);
+  const mime = (file.mimetype || '').toLowerCase();
+  const ext = extname(file.originalname || '').toLowerCase();
+  const imageExts = ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'];
+  const isImageMime =
+    mime.startsWith('image/') ||
+    mime === 'application/octet-stream' ||
+    mime === '';
+  const hasImageExt = !ext || imageExts.includes(ext);
+
+  // Flutter/Android đôi khi gửi octet-stream hoặc thiếu mimetype khi chụp camera.
+  if (isImageMime && hasImageExt) {
+    cb(null, true);
     return;
   }
-  cb(null, true);
+  cb(new BadRequestException('Chỉ chấp nhận file ảnh'), false);
 }
 
 export function toPublicOrderProofPath(filename: string): string {

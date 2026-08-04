@@ -62,11 +62,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
         await showDialog<void>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text('Mã OTP (dev)'),
+            title: const Text('Mã OTP đăng ký'),
             content: Text(
-              'SMTP chưa cấu hình — mã OTP của bạn:\n\n'
-              '${otpResult.devOtp}\n\n'
-              'Mã cũng được in trong console backend.',
+              'Mã OTP của bạn:\n${otpResult.devOtp}\n\n'
+              'Chưa cấu hình Gmail SMTP nên mã hiện tại đây '
+              '(và trên màn hình xác thực).\n'
+              'Muốn nhận qua email: điền SMTP_PASS (App Password) trong backend/.env.',
             ),
             actions: [
               FilledButton(
@@ -80,7 +81,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              otpResult.message ?? 'Đã gửi mã OTP tới email của bạn',
+              otpResult.message ??
+                  'Đã gửi mã OTP tới $email — kiểm tra hộp thư (và Spam).',
             ),
             backgroundColor: AppColors.trustGreen,
           ),

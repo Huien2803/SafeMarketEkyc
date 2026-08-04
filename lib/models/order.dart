@@ -135,14 +135,22 @@ class OrderItem {
     switch (orderStatus) {
       case 'Pending':
         if (isOnlineEscrow) return 'Chờ thanh toán online';
-        return isDirectOrder ? 'Chờ giao trực tiếp' : 'Chờ chuyển khoản';
+        return isDirectOrder ? 'Chờ người bán xác nhận giao' : 'Chờ chuyển khoản';
       case 'Paid':
-        if (isOnlineEscrow && isDirectOrder) {
-          return 'Đã thanh toán — chờ giao hàng';
+        if (isOnlineEscrow && isDirectDelivery) {
+          return 'Đã thanh toán — chờ người bán giao hàng';
         }
-        return isDirectOrder ? 'Đã giao — chờ xác nhận' : 'Đã thanh toán (escrow)';
+        if (isDirectOrder) {
+          // Đơn cũ: handover từng đặt Paid
+          return 'Đã giao — chờ người mua xác nhận';
+        }
+        return isShipOrder
+            ? 'Đã nhận tiền — chờ người bán giao ship'
+            : 'Đã thanh toán';
       case 'Shipped':
-        return 'Đang giao ship';
+        return isDirectDelivery
+            ? 'Người bán đã giao — chờ bạn xác nhận'
+            : 'Đã giao ship — chờ xác nhận nhận hàng';
       case 'Completed':
         return 'Hoàn tất';
       case 'Cancelled':
@@ -155,4 +163,9 @@ class OrderItem {
         return orderStatus;
     }
   }
+
+  /// Người mua chỉ xác nhận nhận hàng sau khi người bán đã giao.
+  bool get buyerCanConfirmReceived =>
+      orderStatus == 'Shipped' ||
+      (isDirectDelivery && orderStatus == 'Paid');
 }

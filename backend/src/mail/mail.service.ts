@@ -1,12 +1,13 @@
 import {
   Injectable,
   Logger,
+  OnModuleInit,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 
-/** Giá trị mẫu trong .env.example — không coi là SMTP thật. */
+/** Giá trị mẫu trong .env — không coi là SMTP thật. */
 const SMTP_PLACEHOLDER_MARKERS = [
   'your_email@gmail.com',
   'your_gmail_app_password',
@@ -16,128 +17,192 @@ const SMTP_PLACEHOLDER_MARKERS = [
 ];
 
 /**
- * Gửi email (OTP đăng ký...). Đọc cấu hình SMTP từ .env:
- *   SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS, MAIL_FROM
+ * Gửi email OTP (đăng ký / quên mật khẩu) qua SMTP (Gmail App Password khuyến nghị).
  *
- * Nếu chưa cấu hình SMTP (môi trường dev), OTP sẽ được in ra console để
- * vẫn test được luồng mà không cần mail thật.
+ * Biến .env: SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS, MAIL_FROM
+ * Tuỳ chọn: SMTP_ALLOW_DEV_FALLBACK=true → khi chưa cấu hình/lỗi SMTP, in OTP ra console (dev).
  */
 @Injectable()
-export class MailService {
+export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
   private transporter: nodemailer.Transporter | null = null;
   private readonly from: string;
   private readonly isDev: boolean;
+  private readonly allowDevFallback: boolean;
+  private readonly smtpUser: string;
 
   constructor(private readonly config: ConfigService) {
-    this.isDev = this.config.get<string>('NODE_ENV', 'development') !== 'production';
-    const host = this.config.get<string>('SMTP_HOST', '').trim();
+    this.isDev =
+      this.config.get<string>('NODE_ENV', 'development') !== 'production';
+    // Dev mặc định cho phép fallback (OTP hiện app) nếu chưa cấu hình SMTP —
+    // khớp hành vi lúc đầu đăng ký vẫn chạy được. Production luôn bắt buộc SMTP.
+    const fallbackCfg = this.config
+      .get<string>('SMTP_ALLOW_DEV_FALLBACK', '')
+      .trim()
+      .toLowerCase();
+    this.allowDevFallback =
+      !this.isDev
+        ? false
+        : fallbackCfg === ''
+          ? true
+          : fallbackCfg === 'true' || fallbackCfg === '1';
+
+    const hostRaw = this.config.get<string>('SMTP_HOST', '').trim();
     const user = this.config.get<string>('SMTP_USER', '').trim();
-    const pass = this.config.get<string>('SMTP_PASS', '').trim();
-    this.from = this.config.get<string>(
-      'MAIL_FROM',
-      user || 'no-reply@safemarket.vn',
-    );
+    // Gmail App Password thường hiện dạng "xxxx xxxx xxxx xxxx" — bỏ khoảng trắng.
+    const pass = this.config
+      .get<string>('SMTP_PASS', '')
+      .trim()
+      .replace(/\s+/g, '');
+    this.smtpUser = user;
+
+    const host =
+      !hostRaw || hostRaw.toLowerCase() === 'gmail'
+        ? 'smtp.gmail.com'
+        : hostRaw;
+
+    const mailFromCfg = this.config.get<string>('MAIL_FROM', '').trim();
+    // Gmail chỉ cho phép From trùng tài khoản đăng nhập (hoặc alias đã xác minh).
+    this.from = this.resolveFrom(mailFromCfg, user);
 
     if (this.isRealSmtpConfig(host, user, pass)) {
       const port = parseInt(this.config.get<string>('SMTP_PORT', '587'), 10);
       const secure =
         this.config.get<string>('SMTP_SECURE', 'false') === 'true' ||
         port === 465;
-      this.transporter = nodemailer.createTransport({
-        host,
-        port,
-        secure,
-        auth: { user, pass },
-        requireTLS: !secure && port === 587,
-        tls: { minVersion: 'TLSv1.2' },
-      });
+
+      const isGmail =
+        host.includes('gmail.com') || hostRaw.toLowerCase() === 'gmail';
+
+      this.transporter = nodemailer.createTransport(
+        isGmail
+          ? {
+              service: 'gmail',
+              auth: { user, pass },
+            }
+          : {
+              host,
+              port,
+              secure,
+              auth: { user, pass },
+              requireTLS: !secure && port === 587,
+              tls: { minVersion: 'TLSv1.2' },
+              connectionTimeout: 20_000,
+              greetingTimeout: 15_000,
+              socketTimeout: 30_000,
+            },
+      );
+      this.logger.log(
+        `SMTP sẵn sàng (${isGmail ? 'Gmail' : host}:${port}) — gửi từ ${this.from}`,
+      );
     } else {
       this.logger.warn(
-        'SMTP chưa cấu hình hoặc đang dùng giá trị mẫu — OTP sẽ in ra console thay vì gửi email.',
+        'SMTP chưa cấu hình (điền SMTP_USER + SMTP_PASS trong backend/.env). ' +
+          (this.allowDevFallback
+            ? 'SMTP_ALLOW_DEV_FALLBACK=true → OTP in console.'
+            : 'Đăng ký sẽ báo lỗi cho đến khi cấu hình SMTP.'),
       );
     }
   }
 
-  /** true nếu OTP được gửi qua SMTP; false nếu chỉ in ra console (dev). */
+  async onModuleInit(): Promise<void> {
+    if (!this.transporter) return;
+    try {
+      await this.transporter.verify();
+      this.logger.log('Kết nối SMTP OK — sẵn sàng gửi OTP email.');
+    } catch (err) {
+      this.logger.error(
+        `Không xác minh được SMTP: ${(err as Error).message}. ` +
+          'Kiểm tra App Password Gmail (2FA + App passwords), hoặc tắt "Less secure" không còn dùng được.',
+      );
+      // Giữ transporter — lỗi sẽ hiện khi gửi; tránh crash boot khi mạng tạm lỗi.
+    }
+  }
+
+  /** true nếu OTP được gửi qua SMTP; false nếu chỉ in console (khi cho phép fallback). */
   async sendRegistrationOtp(email: string, otp: string): Promise<boolean> {
-    const subject = 'Mã xác thực đăng ký SafeMarket';
-    const text = `Mã OTP đăng ký SafeMarket của bạn là: ${otp}\nMã có hiệu lực trong 5 phút. Không chia sẻ mã này cho người khác.`;
+    return this.sendOtpMail({
+      email,
+      otp,
+      subject: 'Mã xác thực đăng ký SafeMarket',
+      text: `Mã OTP đăng ký SafeMarket của bạn là: ${otp}\nMã có hiệu lực trong 5 phút. Không chia sẻ mã này cho người khác.`,
+      html: this.buildOtpHtml(otp),
+      logLabel: 'đăng ký',
+    });
+  }
 
+  async sendPasswordResetOtp(email: string, otp: string): Promise<boolean> {
+    return this.sendOtpMail({
+      email,
+      otp,
+      subject: 'Mã đặt lại mật khẩu SafeMarket',
+      text: `Mã OTP đặt lại mật khẩu SafeMarket của bạn là: ${otp}\nMã có hiệu lực trong 5 phút. Nếu bạn không yêu cầu, hãy bỏ qua email này.`,
+      html: this.buildResetHtml(otp),
+      logLabel: 'đặt lại mật khẩu',
+    });
+  }
+
+  private async sendOtpMail(opts: {
+    email: string;
+    otp: string;
+    subject: string;
+    text: string;
+    html: string;
+    logLabel: string;
+  }): Promise<boolean> {
     if (!this.transporter) {
-      if (!this.isDev) {
-        throw new ServiceUnavailableException(
-          'SMTP chưa cấu hình. Không thể gửi email trên production.',
-        );
-      }
-      this.logDevOtp(email, otp);
-      return false;
-    }
-
-    try {
-      await this.transporter.sendMail({
-        from: this.from,
-        to: email,
-        subject,
-        text,
-        html: this.buildOtpHtml(otp),
-      });
-      this.logger.log(`Đã gửi OTP đăng ký tới ${email}`);
-      return true;
-    } catch (err) {
-      this.logger.error(
-        `Gửi OTP tới ${email} thất bại: ${(err as Error).message}`,
-      );
-      if (this.isDev) {
-        this.logger.warn(
-          'SMTP lỗi trong môi trường dev — fallback in OTP ra console.',
-        );
-        this.logDevOtp(email, otp);
+      if (this.allowDevFallback && this.isDev) {
+        this.logDevOtp(opts.email, opts.otp);
         return false;
       }
       throw new ServiceUnavailableException(
-        'Không thể gửi email xác thực. Kiểm tra cấu hình SMTP trong .env.',
+        'Chưa cấu hình SMTP để gửi email OTP. Điền SMTP_USER và SMTP_PASS (Gmail App Password) trong backend/.env rồi khởi động lại server.',
+      );
+    }
+
+    try {
+      const info = await this.transporter.sendMail({
+        from: this.from,
+        to: opts.email,
+        subject: opts.subject,
+        text: opts.text,
+        html: opts.html,
+        replyTo: this.smtpUser || undefined,
+      });
+      this.logger.log(
+        `Đã gửi OTP ${opts.logLabel} tới ${opts.email} (messageId=${info.messageId ?? 'n/a'})`,
+      );
+      return true;
+    } catch (err) {
+      const msg = (err as Error).message;
+      this.logger.error(`Gửi OTP ${opts.logLabel} tới ${opts.email} thất bại: ${msg}`);
+
+      if (this.allowDevFallback && this.isDev) {
+        this.logger.warn('SMTP lỗi — fallback in OTP ra console (SMTP_ALLOW_DEV_FALLBACK).');
+        this.logDevOtp(opts.email, opts.otp);
+        return false;
+      }
+
+      throw new ServiceUnavailableException(
+        'Không gửi được email OTP. Kiểm tra SMTP_USER/SMTP_PASS (Gmail cần App Password 16 ký tự), hộp thư spam, và kết nối mạng.',
       );
     }
   }
 
-  /** true nếu OTP được gửi qua SMTP; false nếu chỉ in ra console (dev). */
-  async sendPasswordResetOtp(email: string, otp: string): Promise<boolean> {
-    const subject = 'Mã đặt lại mật khẩu SafeMarket';
-    const text = `Mã OTP đặt lại mật khẩu SafeMarket của bạn là: ${otp}\nMã có hiệu lực trong 5 phút. Nếu bạn không yêu cầu, hãy bỏ qua email này.`;
-
-    if (!this.transporter) {
-      if (!this.isDev) {
-        throw new ServiceUnavailableException(
-          'SMTP chưa cấu hình. Không thể gửi email trên production.',
-        );
-      }
-      this.logDevOtp(email, otp);
-      return false;
+  private resolveFrom(mailFromCfg: string, smtpUser: string): string {
+    if (!smtpUser) {
+      return mailFromCfg || 'SafeMarket <no-reply@safemarket.vn>';
     }
+    // no-reply@safemarket.vn sẽ bị Gmail từ chối khi auth bằng Gmail cá nhân.
+    const invalidDomain =
+      !mailFromCfg ||
+      /no-reply@safemarket\.vn/i.test(mailFromCfg) ||
+      /@safemarket\.vn/i.test(mailFromCfg);
 
-    try {
-      await this.transporter.sendMail({
-        from: this.from,
-        to: email,
-        subject,
-        text,
-        html: this.buildResetHtml(otp),
-      });
-      this.logger.log(`Đã gửi OTP đặt lại mật khẩu tới ${email}`);
-      return true;
-    } catch (err) {
-      this.logger.error(
-        `Gửi OTP reset tới ${email} thất bại: ${(err as Error).message}`,
-      );
-      if (this.isDev) {
-        this.logDevOtp(email, otp);
-        return false;
-      }
-      throw new ServiceUnavailableException(
-        'Không thể gửi email. Kiểm tra cấu hình SMTP trong .env.',
-      );
+    if (invalidDomain) {
+      return `SafeMarket <${smtpUser}>`;
     }
+    return mailFromCfg;
   }
 
   private isRealSmtpConfig(host: string, user: string, pass: string): boolean {

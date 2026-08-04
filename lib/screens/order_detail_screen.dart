@@ -450,9 +450,41 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: const Text(
-                      'Hẹn gặp tại địa điểm đã chọn.\n'
-                      'Khách trả tiền mặt khi nhận hàng.\n'
-                      'Người bán xác nhận giao xong → khách xác nhận nhận hàng.',
+                      'Bước 1: Hẹn gặp — khách trả tiền mặt khi nhận\n'
+                      'Bước 2: Người bán bấm xác nhận đã giao & nhận tiền\n'
+                      'Bước 3: Người mua chụp ảnh xác nhận nhận hàng',
+                      style: TextStyle(fontSize: 13, height: 1.45),
+                    ),
+                  ),
+                if (_isBuyer(o) &&
+                    o.orderStatus == 'Pending' &&
+                    !o.needsOnlinePayment)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text(
+                      'Đơn đã đặt. Đang chờ người bán xác nhận giao hàng '
+                      '— bạn chưa thể tự xác nhận nhận hàng.',
+                      style: TextStyle(fontSize: 13, height: 1.45),
+                    ),
+                  ),
+                if (_isBuyer(o) &&
+                    o.isShipOrder &&
+                    o.orderStatus == 'Paid')
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text(
+                      'Người bán đã nhận tiền. Chờ người bán giao ship '
+                      'rồi bạn mới xác nhận nhận hàng.',
                       style: TextStyle(fontSize: 13, height: 1.45),
                     ),
                   ),
@@ -494,7 +526,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                   .markDirectHandover(o.orderId);
                             }),
                     icon: const Icon(Icons.handshake_outlined),
-                    label: const Text('Đã giao hàng trực tiếp'),
+                    label: const Text('Xác nhận đã giao hàng trực tiếp'),
                   ),
                 if (_isSeller(o) && o.isShipOrder && o.orderStatus == 'Pending' && !o.isOnlineEscrow)
                   FilledButton.icon(
@@ -518,7 +550,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               await OrderService.instance.markShipped(o.orderId);
                             }),
                     icon: const Icon(Icons.local_shipping_outlined),
-                    label: const Text('Đã giao ship'),
+                    label: const Text('Xác nhận đã giao ship'),
                   ),
                 ],
                 if (_isSeller(o) && o.isDirectOrder && o.orderStatus == 'Pending')
@@ -530,18 +562,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                   .markDirectHandover(o.orderId);
                             }),
                     icon: const Icon(Icons.handshake_outlined),
-                    label: const Text('Đã giao trực tiếp & nhận tiền mặt'),
+                    label: const Text('Xác nhận đã giao & nhận tiền mặt'),
                     style: FilledButton.styleFrom(
                       backgroundColor: AppColors.trustGreen,
                     ),
                   ),
-                if (_isBuyer(o) &&
-                    ((o.isShipOrder &&
-                            (o.orderStatus == 'Paid' ||
-                                o.orderStatus == 'Shipped')) ||
-                        ((o.isDirectOrder || o.isOnlineEscrow) &&
-                            o.isDirectDelivery &&
-                            o.orderStatus == 'Paid'))) ...[
+                if (_isBuyer(o) && o.buyerCanConfirmReceived) ...[
                   Container(
                     padding: const EdgeInsets.all(12),
                     margin: const EdgeInsets.only(bottom: 8),

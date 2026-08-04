@@ -89,9 +89,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            p.isSold
-                ? 'Sản phẩm đã được bán'
-                : 'Sản phẩm không còn khả dụng để mua',
+            p.isReserved
+                ? 'Sản phẩm đã có người đặt hàng. Bạn không thể đặt lại.'
+                : p.isSold
+                    ? 'Sản phẩm đã được bán'
+                    : 'Sản phẩm không còn khả dụng để mua',
           ),
         ),
       );
@@ -521,11 +523,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     child: FilledButton.icon(
                       onPressed: (_busy || !canBuy) ? null : () => _buyViaChat(p),
                       icon: Icon(
-                        p.isSold
-                            ? Icons.check_circle_outline
-                            : Icons.shopping_cart_outlined,
+                        canBuy
+                            ? Icons.shopping_cart_outlined
+                            : Icons.check_circle_outline,
                       ),
-                      label: Text(p.isSold ? 'Đã bán' : 'Đặt mua'),
+                      label: Text(canBuy ? 'Đặt mua' : p.purchaseBlockedLabel),
                     ),
                   ),
                 ],
@@ -538,10 +540,26 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   }
 }
 
-class _ProductImages extends StatelessWidget {
+class _ProductImages extends StatefulWidget {
   const _ProductImages({required this.product});
 
   final ProductDetail product;
+
+  @override
+  State<_ProductImages> createState() => _ProductImagesState();
+}
+
+class _ProductImagesState extends State<_ProductImages> {
+  final PageController _pageCtrl = PageController();
+  int _currentPage = 0;
+
+  ProductDetail get product => widget.product;
+
+  @override
+  void dispose() {
+    _pageCtrl.dispose();
+    super.dispose();
+  }
 
   List<String> get _urls {
     final urls = <String>[];
@@ -629,22 +647,72 @@ class _ProductImages extends StatelessWidget {
     return _wrapWithStatus(
       SizedBox(
         height: 220,
-        child: PageView.builder(
-          itemCount: _urls.length,
-          itemBuilder: (context, i) => Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(20),
-              child: Image.network(
-                _urls[i],
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => ProductThumbnail(
-                  thumbnailUrl: product.thumbnailUrl,
-                  iconSize: 80,
+        child: Stack(
+          children: [
+            PageView.builder(
+              controller: _pageCtrl,
+              itemCount: _urls.length,
+              onPageChanged: (i) => setState(() => _currentPage = i),
+              itemBuilder: (context, i) => Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Image.network(
+                    _urls[i],
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => ProductThumbnail(
+                      thumbnailUrl: product.thumbnailUrl,
+                      iconSize: 80,
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
+            Positioned(
+              top: 12,
+              right: 12,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '${_currentPage + 1}/${_urls.length}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: 12,
+              left: 0,
+              right: 0,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(
+                  _urls.length,
+                  (i) => AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    width: i == _currentPage ? 18 : 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: i == _currentPage
+                          ? AppColors.primary
+                          : Colors.white.withValues(alpha: 0.7),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

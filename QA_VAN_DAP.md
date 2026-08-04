@@ -1,409 +1,621 @@
-# Tài liệu QA Vấn đáp Khoá luận Tốt nghiệp — SafeMarket
+# Tài liệu VẤN ĐÁP Khoá luận Tốt nghiệp — SafeMarket
 
-> Tài liệu này chứa các câu hỏi hội đồng KLTN thường hỏi và câu trả lời mẫu.  
-> **In ra giấy mang theo lúc vấn đáp**.  
-> Trương Trí Hiền (23DH111023) & Lê Tấn Lộc (23DH111948) — HUFLIT 2026
+> **Đề tài:** Xây dựng hệ thống Marketplace đồ cũ an toàn dựa trên mô hình định danh **eKYC** và **thuật toán xếp hạng tín nhiệm** người dùng.  
+> **Nhóm:** Trương Trí Hiền (23DH111023) & Lê Tấn Lộc (23DH111948)  
+> **GVHD:** ThS. Lê Thị Minh Nguyện — HUFLIT 2026  
+>
+> Tài liệu này đã **đối chiếu với mã nguồn hiện tại** (Flutter + NestJS + SQL Server + Firebase).  
+> **In ra giấy mang theo lúc vấn đáp.** Nói đúng những gì code đang làm — không phóng đại.
 
 ---
 
-## A. Câu hỏi về kiến trúc hệ thống
+## MỤC LỤC
 
-### A1. "Em hãy mô tả kiến trúc tổng quan của hệ thống?"
-
-> Hệ thống của em sử dụng kiến trúc 3 tầng (3-tier architecture) phổ biến trong các app marketplace hiện đại:
->
-> 1. **Tầng giao diện (Presentation)**: Ứng dụng di động viết bằng **Flutter** với Dart, chạy trên Android (và iOS nếu cần).
-> 2. **Tầng nghiệp vụ (Business Logic)**: Backend REST API viết bằng **NestJS** (Node.js + TypeScript) chạy ở port 3000.
-> 3. **Tầng dữ liệu (Data)**: **Microsoft SQL Server**, database tên `SafeMarketDB`.
->
-> Giao tiếp giữa các tầng:
-> - Flutter ↔ NestJS: qua HTTP/JSON, có xác thực JWT
-> - NestJS ↔ SQL Server: qua driver `mssql` + TypeORM
-
-### A2. "Tại sao em không cho Flutter kết nối thẳng vào SQL Server?"
-
-> Em không làm vậy vì 3 lý do:
->
-> 1. **Bảo mật**: Connection string phải có user/password DB. Nếu nằm trong code Flutter, khi app bị decompile sẽ lộ password, ai cũng truy cập được database.
-> 2. **Mạng**: Port 1433 của SQL Server thường bị firewall chặn trên mạng di động 4G/5G.
-> 3. **Khả năng mở rộng**: Có lớp API trung gian giúp em thêm tính năng JWT auth, validate input, rate limit... mà không cần sửa app client.
-
-### A3. "Em chọn NestJS thay vì Express hoặc Spring Boot vì lý do gì?"
-
-> Em chọn NestJS vì 4 lý do:
->
-> 1. **Kiến trúc module hoá** rõ ràng (Module → Controller → Service), giống Angular và Spring Boot mà em đã học.
-> 2. **TypeScript bắt buộc** giúp type-safe, ít bug khi viết code lớn.
-> 3. **Swagger tự sinh** từ decorator, đỡ phải viết tài liệu API thủ công.
-> 4. **Dependency Injection** tích hợp sẵn, dễ test và bảo trì.
-
-### A4. "Em không dùng MongoDB như đề cương ghi, tại sao?"
-
-> Trong đề cương ban đầu em đề xuất MongoDB để lưu log hành vi. Nhưng khi triển khai thực tế em đã quyết định dùng **SQL Server thuần** vì:
->
-> 1. **Quản lý 1 hệ quản trị duy nhất** giảm độ phức tạp khi triển khai và demo.
-> 2. **Bảng `Point_Logs`** trong SQL Server đã đáp ứng đủ nhu cầu lưu log với index tối ưu.
-> 3. **ACID guarantees** của SQL Server quan trọng với các giao dịch tài chính.
-> 4. Với quy mô đồ án, MongoDB không tạo ra lợi ích đáng kể.
+| # | Nội dung |
+|---|----------|
+| A | Tổng quan đề tài & bài toán |
+| B | Kiến trúc hệ thống |
+| C | Cơ sở dữ liệu |
+| D | Đăng ký OTP & Đăng nhập |
+| E | Bảo mật |
+| F | eKYC |
+| G | Thuật toán điểm tín nhiệm & xếp hạng |
+| H | Sản phẩm, tìm kiếm/lọc, ảnh |
+| I | Đơn hàng & Ký quỹ (Escrow) |
+| J | Thanh toán VNPay & Ví |
+| K | Admin & kiểm duyệt |
+| L | Chat realtime (Firebase) |
+| M | Ứng dụng Flutter |
+| N | API đầy đủ (checklist) |
+| O | Triển khai & vận hành |
+| P | Câu hỏi phản biện / edge case |
+| Q | Hạn chế & hướng phát triển (thành thật) |
+| R | Phân công nhóm |
+| S | Câu hỏi bẫy & mẹo trả lời |
+| T | Kịch bản demo |
+| U | Checklist trước vấn đáp |
 
 ---
 
-## B. Câu hỏi về cơ sở dữ liệu
+## A. TỔNG QUAN ĐỀ TÀI & BÀI TOÁN
 
-### B1. "Em hãy giải thích sơ đồ database?"
+### A1. "Em hãy trình bày bài toán đề tài giải quyết?"
 
-> Database `SafeMarketDB` em chia làm 5 schema theo nguyên tắc **Bounded Context** trong Domain-Driven Design:
+> Thị trường mua bán đồ cũ (Chợ Tốt, hội nhóm Facebook) tồn tại **3 vấn đề lớn**:
+> 1. **Người bán ẩn danh** — tài khoản ảo, sim rác; lừa đảo xong biến mất, khó truy vết.
+> 2. **Không đo được lòng tin** — người mua không biết đối phương uy tín đến đâu.
+> 3. **Tiền trao tay rủi ro** — chuyển khoản trước dễ mất tiền, thiếu bên trung gian.
 >
-> | Schema | Bảng | Vai trò |
-> |--------|------|---------|
-> | `Identity` | Users, eKYC_Profiles | Xác thực và định danh |
-> | `Market` | Categories, Products, Product_Images | Sản phẩm rao bán |
-> | `Finance` | Orders, Payments | Đơn hàng và thanh toán |
-> | `Reputation` | Scores, Point_Logs, Reviews | Điểm tín nhiệm và đánh giá |
-> | `Moderation` | Reports | Quản lý báo cáo vi phạm |
+> Đề tài giải quyết bằng: **(1) eKYC** (OCR CCCD + liveness chống giả mạo); **(2) điểm tín nhiệm 0–1000 + 4 hạng** dựa trên hành vi; **(3) ký quỹ (Escrow)** — hệ thống ghi nhận giữ tiền, chỉ giải ngân khi giao dịch hoàn tất (sandbox/demo + VNPay Sandbox).
+
+### A2. "Điểm khác biệt so với Chợ Tốt?"
+
+> 1. **Bắt buộc định danh thật (eKYC)** trước khi mua/bán — Chợ Tốt chủ yếu xác thực SĐT.
+> 2. **Điểm tín nhiệm minh bạch** ghi vào `Point_Logs`, cập nhật hạng tự động.
+> 3. **Ký quỹ trung gian (Escrow)** bảo vệ người mua/người bán — các chợ đồ cũ VN phổ biến chưa có cơ chế này.
+
+### A3. "Đồ án đã hoàn thành những gì?" (trả lời trung thực)
+
+> Đã hoàn thành **MVP chứng minh đề tài**, gồm:
+> 1. ✅ eKYC: OCR CCCD (FPT.AI) + **Active Liveness on-device** (ML Kit quay đầu trái/phải) → admin duyệt.
+> 2. ✅ Điểm tín nhiệm + 4 hạng (Bronze/Silver/Gold/Diamond) + bảng xếp hạng admin.
+> 3. ✅ Backend NestJS REST: Auth, Users, eKYC, Products, Orders, Payments, Wallet, Reviews, Reports, Follows, Notifications, Admin, Chat upload.
+> 4. ✅ Flutter app đầy đủ luồng: đăng ký/đăng nhập, chợ, đăng bán (nhiều ảnh), đơn hàng, ví, chat, admin.
+> 5. ✅ Chat realtime Firebase + bình luận sản phẩm Firebase.
+> 6. ✅ Thanh toán: VNPay Sandbox **hoặc** `simulate-pay` khi chưa cấu hình cổng.
 >
-> Tổng cộng 11 bảng, có quan hệ 1-1, 1-n và n-n thông qua foreign key.
-
-### B2. "Trigger SQL của em làm gì?"
-
-> Em viết 4 trigger chính:
->
-> 1. **`trg_InitializeReputation`** (AFTER INSERT trên Users): Khi đăng ký user mới, tự động tạo bản ghi `Scores` với 500 điểm, hạng Bronze.
-> 2. **`trg_UpdateScoreAndRank`** (AFTER INSERT trên Point_Logs): Mỗi khi cộng/trừ điểm, tự cập nhật `Scores.current_point` (giới hạn 0-1000) và đổi hạng (Bronze < 300 < Silver < 600 < Gold < 850 < Diamond).
-> 3. **`trg_SyncKycStatusOnVerify`** (AFTER UPDATE trên eKYC_Profiles): Khi admin set `verified_at`, tự đồng bộ `Users.kyc_status = 'Verified'`.
-> 4. **`trg_ReportHighSeverityPenalty`** (AFTER INSERT trên Reports): Tự trừ 50 điểm khi user bị báo cáo nghiêm trọng.
-
-### B3. "Tại sao em dùng trigger thay vì xử lý ở backend?"
-
-> Em dùng trigger vì 3 lý do:
->
-> 1. **Đảm bảo toàn vẹn dữ liệu**: Trigger chạy ngay trong transaction, không thể bị bỏ sót như nếu xử lý ở backend.
-> 2. **Hiệu năng**: Trigger chạy trong database engine, không tốn round-trip mạng.
-> 3. **Tách biệt nghiệp vụ**: Logic tính điểm thuộc về tầng dữ liệu (Reputation), nên đặt ở DB phù hợp hơn.
-
-### B4. "Sao em chọn BIGINT cho user_id thay vì INT?"
-
-> Vì BIGINT chứa được số lượng user lên đến 9.2 tỷ tỷ (2^63-1), đảm bảo hệ thống có thể scale sau này mà không phải migrate schema. INT chỉ chứa 2.1 tỷ là quá ít cho một marketplace.
+> **Chưa phải production đầy đủ:** escrow chưa nối dòng tiền ngân hàng thật; Face Match FPT có trên backend nhưng **luồng Flutter hiện tại không gọi**; favorites chỉ lưu local thiết bị.
 
 ---
 
-## C. Câu hỏi về Authentication / Bảo mật
+## B. KIẾN TRÚC HỆ THỐNG
 
-### C1. "Em lưu mật khẩu như thế nào?"
+### B1. "Mô tả kiến trúc tổng quan?"
 
-> Em **KHÔNG bao giờ lưu mật khẩu plaintext**. Trước khi lưu vào DB, em hash bằng **bcrypt** với 10 rounds.
+> **Kiến trúc 3 tầng:**
 >
-> - Bcrypt là thuật toán hash mật khẩu chuẩn quốc tế, có **salt** ngẫu nhiên tự sinh.
-> - 10 rounds nghĩa là thuật toán chạy 2^10 = 1024 vòng băm — đủ chậm để chống brute-force, vẫn đủ nhanh cho user.
-> - Khi login, em dùng `bcrypt.compare()` so sánh mật khẩu nhập với hash đã lưu, không bao giờ decrypt.
-
-### C2. "JWT là gì? Em dùng JWT làm gì?"
-
-> JWT (JSON Web Token) là chuỗi token có 3 phần: **Header.Payload.Signature**, dùng để xác thực user mà không cần lưu session ở server.
+> | Tầng | Công nghệ | Vai trò |
+> |------|-----------|---------|
+> | Trình bày | Flutter (Dart), Material 3 | Android / iOS / Web |
+> | Nghiệp vụ | NestJS 10 (TypeScript), port **3000**, prefix `/api` | REST API, JWT, logic giao dịch |
+> | Dữ liệu | SQL Server — DB `SafeMarketDB` | Lưu bền vững, trigger, CHECK |
 >
-> Luồng của em:
-> 1. User login → server tạo JWT chứa `userId`, `email`, ký bằng secret key.
-> 2. Server trả token về app, app lưu vào `SharedPreferences`.
-> 3. Mọi request tiếp theo, app gửi kèm `Authorization: Bearer <token>`.
-> 4. Server verify chữ ký bằng secret key → biết user là ai.
+> **Dịch vụ ngoài:**
+> - FPT.AI Vision — OCR CCCD (+ Face Match API còn trên backend)
+> - Firebase Realtime Database — chat + bình luận sản phẩm
+> - VNPay Sandbox — thanh toán ký quỹ online
+> - SMTP/Nodemailer — OTP (dev: OTP in console nếu chưa cấu hình SMTP)
 >
-> Token của em hết hạn sau 7 ngày, sau đó user phải đăng nhập lại.
+> **Luồng:** Flutter ⟷ NestJS (HTTP/JSON + JWT) ⟷ SQL Server (TypeORM + `mssql`). Chat/comment: Flutter ⟷ Firebase RTDB.
 
-### C3. "JWT của em có an toàn không?"
+### B2. "Vì sao không cho Flutter kết nối thẳng SQL Server?"
 
-> Em đảm bảo 3 điểm an toàn:
->
-> 1. **Secret key dài, không hardcode trong code** mà nằm trong file `.env` (đã được gitignore).
-> 2. **Hết hạn token** sau 7 ngày để giảm cửa sổ tấn công.
-> 3. **Mỗi request kiểm tra `accountStatus`** — nếu admin đã khoá user, token cũ vẫn không dùng được nữa.
+> 1. **Bảo mật:** connection string chứa mật khẩu DB — lộ nếu decompile APK.  
+> 2. **Mạng:** port 1433 thường bị chặn từ 4G/Internet.  
+> 3. **Kiểm soát:** API trung gian thêm JWT, validate, phân quyền, rate-limit.
 
-### C4. "Em chống được tấn công SQL Injection không?"
+### B3. "Vì sao chọn NestJS?"
 
-> Có, em chống được nhờ:
->
-> 1. **TypeORM dùng parameterized query** mặc định. Mọi tham số đều được escape tự động.
-> 2. **Class-validator** kiểm tra mọi input trước khi đến service: regex SĐT, định dạng email, độ dài mật khẩu.
-> 3. **ValidationPipe(`whitelist: true`)** loại bỏ các field không khai báo trong DTO, tránh user gửi thêm trường gây lỗi.
+> Module hoá (Controller → Service → Repository), TypeScript type-safe, DI sẵn, Swagger tự sinh (`/api/docs`), hệ sinh thái Node (bcrypt, axios, nodemailer…).
 
-### C5. "Sao em không dùng `flutter_secure_storage` mà dùng `SharedPreferences`?"
+### B4. "TypeORM dùng thế nào?"
 
-> Đúng là `flutter_secure_storage` (lưu vào Android Keystore) bảo mật hơn. Trong phạm vi đồ án em dùng `SharedPreferences` vì đơn giản hơn và đủ cho mức demo. Đây là **hướng phát triển em đã ghi trong báo cáo** — khi triển khai thật sẽ chuyển sang secure storage.
+> Entity ánh xạ bảng SQL. `synchronize: false` — **không tự sửa schema**; schema do script SQL/migration kiểm soát (giữ trigger/constraint).
+
+### B5. "Backend có những module nào?"
+
+> **Có REST controller:** Auth, Users, Ekyc, Products, Orders, Payments, Wallet, Chat, Reviews, Reports, Follows, Notifications, Admin.  
+> **Service-only (không REST riêng):** Mail (OTP), Reputation (được Orders/Admin/Reviews gọi).
 
 ---
 
-## D. Câu hỏi về eKYC
+## C. CƠ SỞ DỮ LIỆU
 
-### D1. "eKYC của em hoạt động thế nào?"
+### C1. "Giải thích schema?"
 
-> Luồng eKYC gồm 3 bước:
+> DB `SafeMarketDB` chia **5 schema** (bounded context):
 >
-> 1. **Quét CCCD/Hộ chiếu**: User chụp ảnh CCCD mặt trước và mặt sau.
-> 2. **OCR**: App gửi ảnh lên backend, backend gọi **FPT.AI Vision API** để trích xuất thông tin (họ tên, số CCCD, ngày sinh, địa chỉ).
-> 3. **Face matching**: User chụp selfie. Backend gọi FPT.AI Face Match so khớp khuôn mặt selfie với ảnh trên CCCD. Trả về độ tương đồng (0-1), em quy định ngưỡng > 0.8 mới chấp nhận.
-> 4. Lưu kết quả vào bảng `Identity.eKYC_Profiles`. Khi admin duyệt, trigger SQL tự đổi `Users.kyc_status = 'Verified'`.
-
-### D2. "Sao em chọn FPT.AI?"
-
-> Em chọn FPT.AI vì 4 lý do:
+> | Schema | Bảng chính | Vai trò |
+> |--------|------------|---------|
+> | `Identity` | `Users`, `eKYC_Profiles`, `RefreshTokens` | Định danh, CCCD, refresh token |
+> | `Market` | `Categories`, `Products`, `Product_Images`, `Chat_*`, `User_Follows`, `Notifications` | Sản phẩm, chat SQL (legacy), follow, thông báo |
+> | `Finance` | `Orders`, `Payments`, `Wallets`, `Wallet_Transactions`, `Withdrawals` | Đơn, escrow, ví, rút tiền |
+> | `Reputation` | `Scores`, `Point_Logs`, `Reviews` | Điểm, log điểm, đánh giá |
+> | `Moderation` | `Reports` | Báo cáo vi phạm |
 >
-> 1. **API tiếng Việt**: Nhận diện CCCD/CMND Việt Nam chính xác > 95%.
-> 2. **Có free tier**: 500 lượt OCR + 500 Face Match miễn phí mỗi tháng, đủ cho đồ án.
-> 3. **Tài liệu tiếng Việt**: Dễ tra cứu khi gặp lỗi.
-> 4. **Được tin dùng**: Các app như MoMo, ViettelPay đều sử dụng FPT.AI.
+> Schema gốc trong `eKYC Market.sql` (11 bảng cốt lõi); các file `backend/db/migrate-*.sql` bổ sung refresh token, ví, moderation, follow/notifications, chat tables, v.v.
 
-### D3. "Nếu không có internet thì sao?"
+### C2. "Các trigger quan trọng?"
 
-> Đây là **hạn chế của hệ thống em**. eKYC yêu cầu kết nối internet để gọi FPT.AI. Hướng phát triển trong báo cáo của em đề xuất:
->
-> 1. Dùng **Google ML Kit** chạy on-device cho OCR cơ bản khi offline.
-> 2. Cache kết quả OCR, khi có mạng mới upload.
+> 1. **`trg_InitializeReputation`** — user mới → `Scores` = **500 / Bronze**.  
+> 2. **`trg_UpdateScoreAndRank`** — sau INSERT `Point_Logs` → cập nhật điểm (clamp 0–1000) + hạng.  
+> 3. **`trg_SyncKycStatusOnVerify`** — khi set `verified_at` → `Users.kyc_status = Verified`.  
+> 4. **`trg_ReportHighSeverityPenalty`** — báo cáo `severity=high` → `Point_Logs` **−50** (`REPORT_HIGH`).
 
-### D4. "Em làm sao chống ảnh giả (deepfake, ảnh chụp lại màn hình)?"
+### C3. "Constraint đáng nhớ?"
 
-> Em phụ thuộc vào **liveness detection** của FPT.AI — service yêu cầu user quay đầu, chớp mắt, đảm bảo là người thật chứ không phải ảnh chụp. Đây là tính năng tích hợp sẵn của FPT.AI Face Match Premium.
+> UNIQUE: email, phone, `Scores.user_id`, `eKYC_Profiles.user_id`, **`Orders.product_id`** (mỗi món đồ cũ chỉ 1 đơn active theo thiết kế).  
+> CHECK: điểm 0–1000, `condition_pct` 0–100, status hợp lệ…
+
+### C4. "Chat lưu ở đâu — SQL hay Firebase?"
+
+> **Tin nhắn realtime chính: Firebase RTDB** (`safemarket/messages`, `threads`, `userThreads`).  
+> Nest còn module Chat SQL (legacy) — app Flutter **không dùng** API messages SQL; chỉ dùng Nest để **upload ảnh chat** và tạo đơn từ chat (OrderService).
 
 ---
 
-## E. Câu hỏi về Thuật toán Tín nhiệm
+## D. ĐĂNG KÝ OTP & ĐĂNG NHẬP
 
-### E1. "Em tính điểm tín nhiệm thế nào?"
+### D1. "Luồng đăng ký?"
 
-> Em không tính bằng công thức cố định, mà dựa trên **lịch sử hành vi** lưu trong bảng `Point_Logs`:
+> **Bước 1** `POST /api/auth/register/request-otp`:
+> - Chuẩn hoá email, chặn domain disposable (~23 domain).
+> - Kiểm tra email/SĐT chưa tồn tại.
+> - Cooldown gửi lại **30 giây**.
+> - OTP **6 số**, TTL **5 phút**, lưu **RAM**; gửi SMTP (hoặc in console/devOtp khi chưa cấu hình).
 >
-> | Sự kiện | Delta điểm |
-> |---------|------------|
-> | Đăng ký tài khoản | +500 (mặc định) |
-> | Hoàn thành eKYC | +100 |
-> | Hoàn thành 1 giao dịch | +20 |
-> | Nhận đánh giá 5⭐ | +30 |
-> | Hủy đơn không lý do | -50 |
-> | Bị báo cáo nghiêm trọng | -50 (qua trigger) |
-> | Bị admin khóa | -200 |
->
-> Trigger SQL `trg_UpdateScoreAndRank` tự tính lại tổng và phân hạng.
+> **Bước 2** `POST /api/auth/register/verify-otp`:
+> - Sai tối đa **5 lần**.
+> - Đúng → tạo user (bcrypt), trigger tạo Scores 500 Bronze → cấp **access JWT + refresh token**.
 
-### E2. "Phân hạng dựa vào điểm thế nào?"
+### D2. "Đăng nhập?"
 
-> Em dùng 4 mức:
->
-> | Hạng | Điểm | UI |
-> |------|------|-----|
-> | Bronze (Đồng) | 0-299 | Người mới |
-> | Silver (Bạc) | 300-599 | Khá uy tín |
-> | Gold (Vàng) | 600-849 | Uy tín cao |
-> | Diamond (Kim cương) | 850-1000 | Top trader |
->
-> Hạng càng cao, sản phẩm càng được ưu tiên hiển thị trên Marketplace.
+> `POST /api/auth/login` với email **hoặc** SĐT + mật khẩu → `bcrypt.compare` → check `account_status = Active` → trả access + refresh.  
+> Thông báo lỗi **mơ hồ** (chống enumeration).
 
-### E3. "Sao điểm bị giới hạn 0-1000?"
+### D3. "Tài khoản demo?"
 
-> Em dùng `CHECK constraint` ở SQL Server và logic trong trigger để giới hạn điểm trong [0, 1000]. Mục đích:
+> | Email | Mật khẩu (dev) | Ghi chú |
+> |-------|----------------|---------|
+> | `admin@safemarket.vn` | `admin123` | Admin, Verified |
+> | `an.nguyen@email.com` | `123456` | Verified, seed ~850 Gold |
+> | `b.tran@email.com` | `123456` | Pending KYC |
+> | `c.le@email.com` | `123456` | Verified |
+> | `d.pham@email.com` | `123456` | Locked (demo) |
 >
-> 1. **Tránh điểm âm**: Nếu một user toàn nhận điểm trừ, không nên xuống dưới 0.
-> 2. **Tránh điểm vô hạn**: Có giới hạn trên giúp việc phân hạng nhất quán.
-> 3. **Dễ trực quan hóa**: 1000 là số tròn, dễ hiển thị progress bar 0-100%.
+> Backend nhận diện hash placeholder: `HASH_DEMO` ↔ `123456`; `HASH_REPLACE_IN_PRODUCTION` ↔ `admin123`.
+
+### D4. "Quên mật khẩu?"
+
+> `password/forgot` → OTP email → `password/reset` → đổi mật khẩu bcrypt + **revoke mọi refresh token**.
 
 ---
 
-## F. Câu hỏi về Flutter
+## E. BẢO MẬT
 
-### F1. "Em chọn Flutter vì lý do gì?"
+### E1. "Mật khẩu lưu thế nào?"
 
-> 3 lý do:
->
-> 1. **Cross-platform**: 1 codebase chạy được cả Android và iOS.
-> 2. **Hot reload**: Sửa code → app refresh trong 1 giây, tăng tốc dev.
-> 3. **Material Design 3**: Sẵn theme đẹp, đỡ phải tự thiết kế.
+> **bcrypt, 10 rounds**, có salt. Không lưu plaintext. So khớp bằng `bcrypt.compare`.
 
-### F2. "App của em xử lý state thế nào?"
+### E2. "JWT + Refresh token?" ⭐ (đừng nói sai như bản QA cũ)
 
-> Em dùng **state đơn giản** vì đồ án không phức tạp:
->
-> - **Local state**: `StatefulWidget` + `setState()` cho từng màn.
-> - **Auth state toàn cục**: Singleton `AuthService` extends `ChangeNotifier`. Khi login/logout, gọi `notifyListeners()` để rebuild các widget đang lắng nghe.
-> - **Lưu trữ persistent**: `SharedPreferences` cho token và user JSON.
->
-> Khi mở rộng, có thể chuyển sang Provider hoặc Riverpod.
+> - **Access token JWT:** mặc định hết hạn **15 phút** (`JWT_EXPIRES_IN=15m`). Payload: `sub`, `email`, `isAdmin`.  
+> - **Refresh token:** opaque (48 bytes hex), hash **SHA-256** lưu bảng `Identity.RefreshTokens`, mặc định **7 ngày**, **rotate** mỗi lần refresh.  
+> - Logout → revoke refresh.  
+> - Flutter lưu token trong **`flutter_secure_storage`** (keys `safemarket.access_token` / `safemarket.refresh_token`); profile user có thể còn SharedPreferences. App tự refresh khi 401.
 
-### F3. "Sao trên Android Emulator phải dùng `10.0.2.2` mà không phải `localhost`?"
+### E3. "JWT stateless thì khoá user thế nào?"
 
-> Vì Android Emulator là một máy ảo riêng biệt:
->
-> - Emulator coi `localhost` (127.0.0.1) là **chính nó**, không phải máy host (PC của em).
-> - Để gọi máy host từ emulator, Google đã định nghĩa địa chỉ ảo **`10.0.2.2`** ánh xạ tới `localhost` của host.
-> - Trên điện thoại thật, em dùng IP LAN (ví dụ `192.168.1.10`).
->
-> File `lib/services/api_config.dart` của em tự detect platform để chọn đúng URL.
+> Mỗi request, `JwtStrategy.validate()` **đọc lại DB**: user tồn tại + `account_status === Active`. Suspend hết hạn (`locked_until`) có thể tự mở. Admin khoá/cấm → token cũ **vô hiệu ngay**.
 
-### F4. "FutureBuilder hoạt động thế nào?"
+### E4. "Phân quyền admin?"
 
-> `FutureBuilder` là widget của Flutter để hiển thị UI **dựa trên kết quả async**:
->
-> 1. Khi widget build, nó subscribe vào `Future`.
-> 2. `builder()` được gọi nhiều lần với `snapshot` khác nhau:
->    - `ConnectionState.waiting` → hiện loading
->    - `snapshot.hasError` → hiện lỗi
->    - `snapshot.hasData` → hiện dữ liệu
-> 3. Khi user kéo refresh, em tạo `Future` mới và `setState()`.
->
-> Em dùng FutureBuilder ở màn Profile để gọi `/users/me`.
+> `AuthGuard('jwt')` + kiểm tra `isAdmin`. Service chặn thao tác lên chính admin.
+
+### E5. "Chống SQL Injection / mass assignment?"
+
+> TypeORM parameterized query; `ValidationPipe` whitelist + forbidNonWhitelisted; DTO + class-validator.
+
+### E6. "Rate limit?"
+
+> `@nestjs/throttler` global: **100 request / 60 giây** mỗi IP (mặc định).
+
+### E7. "Upload an toàn?"
+
+> Multer: chỉ ảnh, giới hạn dung lượng (vd sản phẩm ≤5MB/ảnh), lưu `uploads/`. Chưa quét virus — ghi là hạn chế.
 
 ---
 
-## G. Câu hỏi về Code và Triển khai
+## F. eKYC (XÁC THỰC DANH TÍNH) ⭐
 
-### G1. "Em deploy backend lên đâu khi demo?"
+### F1. "Luồng eKYC thực tế trong app?"
 
-> Em chạy trên máy tính cá nhân với **PM2 process manager**. PM2 là tool chuẩn để chạy Node.js app trong production:
+> **Luồng Flutter hiện tại:**
+> 1. Chụp **mặt trước CCCD** → `POST /api/ekyc/scan-id-front` (FPT.AI OCR).  
+> 2. (Có thể) chụp **mặt sau** → `POST /api/ekyc/scan-id-back`.  
+> 3. **Active Liveness on-device** (`liveness_challenge_screen.dart` + ML Kit): nhìn thẳng → quay trái → quay phải.  
+> 4. `POST /api/ekyc/submit` với `livenessToken` + `recognitionPoints` (≥ 4) → `kyc_status = Pending`.  
+> 5. **Admin duyệt** → `verified_at` → trigger đồng bộ `Verified`.
 >
-> 1. Backend chạy ngầm dưới dạng daemon, đóng terminal không tắt app.
-> 2. Tự restart nếu crash.
-> 3. Có dashboard `pm2 monit` show CPU/RAM realtime.
-> 4. Auto-start khi máy boot.
->
-> Nếu deploy thật, em sẽ đưa lên VPS Ubuntu + PM2 + Nginx reverse proxy.
+> ⚠️ **Face Match (`POST /api/ekyc/face-match`) có trên backend nhưng UI hiện không gọi.** Khi hội đồng hỏi: em dùng OCR FPT + liveness chủ động on-device + admin duyệt; Face Match là API dự phòng/tương thích.
 
-### G2. "Em test backend bằng cách nào?"
+### F2. "Liveness chống giả mạo thế nào?"
 
-> Em test bằng 3 cách:
->
-> 1. **Swagger UI** tại `http://localhost:3000/api/docs` — test từng endpoint trực quan.
-> 2. **File `requests.http`** với extension REST Client trong VS Code — script test nhanh.
-> 3. **App Flutter trực tiếp** — test luồng end-to-end.
->
-> Với KLTN, em không viết unit test toàn diện do giới hạn thời gian — đây là hướng phát triển em đã ghi trong báo cáo.
+> Không chỉ selfie tĩnh. Dùng **Google ML Kit Face Detection**:
+> - Đúng 1 khuôn mặt, mắt mở.  
+> - Góc yaw: thẳng ≤ ~12° → trái ≥ ~20° → phải ≤ ~−20°.  
+> - Ảnh tĩnh / ảnh in khó vượt vì phải **xoay đầu theo lệnh**.  
+> Backend khi submit kiểm tra có `livenessToken` + đủ `recognitionPoints`.  
+> *(Lưu ý: `POST /ekyc/liveness-check` phía server hiện demo always-pass; token liveness chủ yếu sinh phía client — đây là hạn chế nếu bị hỏi sâu.)*
 
-### G3. "Code của em có dùng pattern nào không?"
+### F3. "Vì sao liveness on-device?"
 
-> Có một số pattern:
->
-> 1. **Repository Pattern** (qua TypeORM): Service không truy cập DB trực tiếp, mà qua Repository.
-> 2. **Dependency Injection**: NestJS tự inject service vào controller qua constructor.
-> 3. **DTO Pattern**: Object truyền dữ liệu giữa client-server, validate ở DTO không phải service.
-> 4. **Singleton**: `AuthService.instance` trong Flutter — chỉ 1 instance toàn app.
+> Realtime (không gửi từng frame lên server), tiết kiệm quota FPT, riêng tư hơn.
 
-### G4. "Em viết code này một mình hay tham khảo?"
+### F4. "Ai duyệt eKYC?"
 
-> Em tham khảo từ:
->
-> 1. Tài liệu chính thức của NestJS, TypeORM, Flutter
-> 2. Tutorial trên YouTube (freeCodeCamp, NetNinja)
-> 3. Stack Overflow khi gặp lỗi cụ thể
-> 4. Hỏi GVHD ThS. Lê Thị Minh Nguyện khi gặp vấn đề kiến trúc
->
-> Em không copy nguyên mẫu, mà tổng hợp và viết lại theo nhu cầu đồ án.
+> Admin: `POST /api/admin/ekyc/:userId/approve` hoặc `reject` (+ lý do).
+
+### F5. "eKYC bắt buộc ở đâu?"
+
+> **Đăng bán** và **đặt mua** đều yêu cầu `kyc_status = Verified` (backend + Flutter `ensureEkycVerified`).
+
+### F6. "Dữ liệu CCCD bảo vệ thế nào?"
+
+> API mask số CCCD (ví dụ chỉ hiện một phần); ảnh lưu server `/uploads`. Chưa mã hoá at-rest — hướng phát triển theo Nghị định 13/2023.
+
+### F7. "Duyệt eKYC có cộng điểm không?"
+
+> **Hiện tại: KHÔNG.** Không có `KYC_SUCCESS +100` trong code. Điểm chỉ đổi theo giao dịch / review / báo cáo / admin.  
+> *(Nếu hội đồng hỏi vì sao: có thể nói đây là hạn chế MVP — ưu tiên “định danh rồi mới được giao dịch”; cộng điểm KYC là hướng mở rộng.)*
 
 ---
 
-## H. Câu hỏi về Demo và lỗi
+## G. THUẬT TOÁN ĐIỂM TÍN NHIỆM & XẾP HẠNG ⭐
 
-### H1. "Tại sao backend tự tắt giữa chừng demo?"
+### G1. "Tính điểm thế nào?" (NÓI ĐÚNG CODE)
 
-> Có thể do 1 trong các nguyên nhân:
+> Điểm khởi tạo **500 / Bronze**. Mỗi thay đổi ghi `Point_Logs` (`delta`, `reason_code`, `note`).  
+> **Bảng Δ thực tế trong code:**
 >
-> 1. Em chưa chạy `pm2 start` mà chỉ chạy `npm run start:dev` — đóng terminal là tắt.
-> 2. SQL Server service bị stop → backend không connect được → crash.
-> 3. Hết quota FPT.AI (500 req/tháng) — không phải backend tắt mà là feature eKYC bị lỗi.
-
-### H2. "Demo bị lỗi gì em xử lý thế nào?"
-
-> Em đã chuẩn bị các phương án dự phòng:
+> | Sự kiện | `reason_code` | Δ |
+> |---------|---------------|---|
+> | Đăng ký (trigger) | — | = **500** |
+> | Hoàn tất đơn (buyer & seller) | `ORDER_COMPLETE` | **+20** mỗi bên |
+> | Nhận đánh giá 5★ | `REVIEW_5_STAR` | **+30** |
+> | Bị báo cáo `severity=high` | `REPORT_HIGH` | **−50** (SQL trigger) |
+> | Admin phạt | `ADMIN_PENALTY` | −(1..500) |
+> | Admin cảnh cáo | `ADMIN_WARNING` | **0** (chỉ ghi log) |
+> | Phạt khi xử lý tranh chấp | `DISPUTE_PENALTY` | mặc định **−50** (có thể tắt) |
 >
-> 1. Nếu eKYC API lỗi → có **mock mode** trong code, vẫn tạo được record giả lập.
-> 2. Nếu mạng yếu → có **timeout 15s**, app báo lỗi rõ ràng.
-> 3. Nếu DB lỗi → em show trực tiếp file SQL để giải thích schema.
-> 4. Em luôn có **2 user mẫu** đã được verify sẵn trong database để demo không phụ thuộc đăng ký mới.
+> ❌ **Không có trong code:** `KYC_SUCCESS +100`, trừ điểm khi hủy đơn, reason `ORDER_CANCELLED`.  
+> ❌ Một số text trên UI cũ (order detail) có thể **lệch** — khi vấn đáp **ưu tiên bảng trên**.
 
-### H3. "Em demo nhiệm vụ phân chia thế nào với bạn Lộc?"
+### G2. "4 hạng?"
 
-> Phân chia của nhóm em:
+> | Hạng | Điểm |
+> |------|------|
+> | Bronze | 0–299 |
+> | Silver | 300–599 |
+> | Gold | 600–849 |
+> | Diamond | ≥ 850 |
 >
-> | Hiền (em) | Lộc |
-> |-----------|-----|
-> | Backend NestJS, JWT Auth | Module eKYC + FPT.AI integration |
-> | Database schema | Module Payment (VNPay) |
-> | Flutter Auth UI | Module Scoring + Admin Dashboard |
-> | Báo cáo phần Phân tích & Kiến trúc | Báo cáo phần Thuật toán & Test |
+> Clamp **0–1000**. Hàm `rankFor()` ở backend + trigger SQL thống nhất ngưỡng.
+
+### G3. "Xếp hạng admin?"
+
+> `GET /api/admin/users/ranking?order=asc|desc`:  
+> 1) **Verified trước** chưa Verified; 2) trong nhóm sort theo `trustScore`; 3) gắn số thứ hạng.
+
+### G4. "Điểm dùng ở đâu trên marketplace?"
+
+> Hiển thị trên hồ sơ / API user; admin ranking.  
+> **Chưa** có sort sản phẩm theo điểm tín nhiệm.  
+> *(Hạn chế so với tựa đề “xếp hạng” — nếu hỏi: thuật toán đã tính & xếp trên admin; gắn vào feed marketplace là hướng phát triển.)*
+
+### G5. "Vì sao điểm 0–1000?"
+
+> Trực quan, tránh âm vô hạn / farm vô hạn; CHECK + clamp bảo vệ.
 
 ---
 
-## I. Câu hỏi về Hướng phát triển
+## H. SẢN PHẨM, TÌM KIẾM/LỌC, ẢNH
 
-### I1. "Em đề xuất phát triển tiếp gì?"
+### H1. "Trạng thái sản phẩm?"
 
-> Theo đề cương em đã ghi:
->
-> 1. **Chat real-time** giữa người mua-bán (Socket.io)
-> 2. **Tích hợp đơn vị vận chuyển** (Giao Hàng Nhanh, Viettel Post API)
-> 3. **Hệ thống Recommendation** dựa trên lịch sử mua sắm (Collaborative Filtering)
-> 4. **Notification push** qua Firebase Cloud Messaging
-> 5. **Đa ngôn ngữ** (English) cho người nước ngoài bán đồ
-> 6. **Web Admin** thay vì chỉ Flutter (cho admin quản lý dễ hơn trên màn lớn)
+> `Available` → `Reserved` (có đơn) → `Sold`; huỷ đơn → lại `Available`; admin/user ẩn → `Hidden`.  
+> `condition_pct` 0–100 mô tả độ mới đồ cũ.
 
-### I2. "Đồ án này có thể đưa vào sản xuất thật được không?"
+### H2. "Đăng bán nhiều ảnh?"
 
-> Chưa đủ. Để đưa vào production thật cần thêm:
->
-> 1. **HTTPS** với SSL certificate
-> 2. **Refresh token** thay vì chỉ access token
-> 3. **Rate limiting** chống DDoS
-> 4. **Logging tập trung** (ELK stack)
-> 5. **Monitoring** (Prometheus + Grafana)
-> 6. **CI/CD pipeline**
-> 7. **Pen-test** bởi bên thứ 3 trước khi launch
->
-> Đồ án này là **MVP (Minimum Viable Product)** chứng minh tính khả thi của giải pháp eKYC + Trust Score.
+> Multipart field **`images`**, tối đa **8 ảnh**, ≤5MB/ảnh. Ảnh đầu = `thumbnail_url`; tất cả lưu `Product_Images` với `sort_order`. Chi tiết sản phẩm: PageView + chỉ số trang.
+
+### H3. "Lọc / tìm kiếm?"
+
+> `GET /api/products`: `categoryId`, `search`, `minPrice`/`maxPrice`, `location`, `verifiedOnly`, `sort` = `newest|oldest|price_asc|price_desc`.
+
+### H4. "Bình luận sản phẩm?"
+
+> Có — **Firebase** `safemarket/productComments/{productId}/` (hỏi đáp công khai dưới tin đăng).
+
+### H5. "Yêu thích?"
+
+> **Chỉ local** SharedPreferences (`safemarket.favorites`) — chưa API Nest. Nói rõ nếu bị hỏi.
 
 ---
 
-## J. Mẹo trả lời chung
+## I. ĐƠN HÀNG & KÝ QUỸ (ESCROW) ⭐
+
+### I1. "Vòng đời đơn hàng?"
+
+> `Pending` → `Paid` → (`Shipped` nếu SHIP) → `Completed`  
+> Rẽ nhánh: `Cancelled` | `Disputed` → admin `REFUND_BUYER` / `RELEASE_SELLER`.
+
+### I2. "Phương thức thanh toán / giao hàng?"
+
+> **Thanh toán:** `BANK_TRANSFER` | `CASH` | `ONLINE_ESCROW`.  
+> **Giao:** `SHIP` | `DIRECT` (bàn giao tận tay).
+
+### I3. "Escrow hoạt động thế nào?"
+
+> Với `ONLINE_ESCROW`:
+> 1. Checkout / thanh toán → `escrow_status = Holding`, đơn `Paid`.  
+> 2. Người bán giao hàng / xác nhận bàn giao.  
+> 3. Người mua **complete** → escrow `Released` + **cộng ví người bán** + cộng điểm `ORDER_COMPLETE`.  
+> 4. Huỷ / admin hoàn → `Refunded`.
+>
+> **Trung thực:** đây là **ký quỹ mức ứng dụng** (trạng thái + ví nội bộ), chưa phải giữ tiền tại ngân hàng thật.
+
+### I4. "Hai người mua cùng lúc?"
+
+> UNIQUE `product_id` + check `Available` → người sau lỗi (vd 409).
+
+---
+
+## J. THANH TOÁN VNPAY & VÍ
+
+### J1. "VNPay?"
+
+> `POST /api/payments/orders/:orderId/checkout` tạo URL VNPay Sandbox nếu đã cấu hình `VNPAY_*`.  
+> Return/IPN: `/api/payments/vnpay-return`, `/api/payments/vnpay-ipn`.  
+> Chưa cấu hình → **devMode** + `POST .../simulate-pay` để demo.
+
+### J2. "Ví người bán?"
+
+> Module Wallet: số dư, lịch sử giao dịch, yêu cầu rút tiền (`Withdrawals`).  
+> Admin: duyệt / từ chối rút tiền (+ ghi chú nếu có).
+
+---
+
+## K. ADMIN & KIỂM DUYỆT
+
+### K1. "Admin làm được gì?"
+
+> - KPI / thống kê  
+> - Danh sách user, ranking tín nhiệm  
+> - Duyệt / từ chối eKYC  
+> - Cảnh cáo / khoá / đình chỉ có hạn (`locked_until`) / cấm / phạt điểm / xoá mềm / mở khoá  
+> - Ẩn sản phẩm, xử lý báo cáo  
+> - Xử lý tranh chấp đơn hàng  
+> - Duyệt rút tiền  
+> - (Flutter) xuất báo cáo PDF/CSV
+
+### K2. "Báo cáo vi phạm?"
+
+> User `POST /api/reports`. Severity `high` → trigger −50 điểm người bị báo cáo (có rủi ro spam — xem mục P).
+
+---
+
+## L. CHAT REALTIME (FIREBASE)
+
+### L1. "Chat dùng công nghệ gì?"
+
+> **Firebase Realtime Database** (không phải Firestore).  
+> Project: `safemarketekyc-38009`, region `asia-southeast1`.
+
+### L2. "Cây dữ liệu?"
+
+> ```
+> safemarket/
+>   threads/{threadKey}          — metadata hội thoại
+>   messages/{threadKey}/{msgId} — tin nhắn realtime
+>   userThreads/{userId}/        — danh sách chat từng user
+>   productComments/{productId}/ — bình luận sản phẩm
+> ```
+> Thread key deterministic: `{lowUserId}_{highUserId}_{productId}`.
+
+### L3. "Loại tin nhắn?"
+
+> TEXT, IMAGE (upload Nest `/api/chat/upload-image`), PRODUCT_CARD, PURCHASE_REQUEST, xác nhận bán…  
+> Mở chat + gửi thẻ sản phẩm → đặt mua qua luồng Order Nest.
+
+### L4. "Làm sao biết chat đã chạy?"
+
+> Gửi tin trong app → Firebase Console → Realtime Database → bung node `safemarket` → `messages` thấy dữ liệu nhảy realtime.
+
+---
+
+## M. ỨNG DỤNG FLUTTER
+
+### M1. "Các màn hình chính?"
+
+> AuthGate, Login/Register/OTP/Forgot, Marketplace, Product detail, Đăng bán, Profile / Public profile, eKYC + Liveness, Đơn hàng, Chat list/screen, Ví, Thông báo, Favorites, Reviews, Admin dashboard.
+
+### M2. "Quản lý trạng thái đăng nhập?"
+
+> `AuthService` singleton + secure storage token + `AuthGate` quyết định vào app hay login. Auto refresh token khi 401.
+
+### M3. "App tìm địa chỉ backend thế nào?"
+
+> `ApiConfig.resolveBaseUrl()` ping lần lượt:
+> - Android emulator → `10.0.2.2:3000`  
+> - Web/Desktop → `localhost`  
+> - Máy thật → IP LAN (`API_HOST` / `API_BASE_URL` qua `--dart-define`)
+
+### M4. "Liveness dùng package gì?"
+
+> `camera` + `google_mlkit_face_detection` (landmarks, classification, góc đầu).
+
+---
+
+## N. API ĐẦY ĐỦ (CHECKLIST HỘI ĐỒNG)
+
+> Prefix: `/api` — Swagger: `http://localhost:3000/api/docs`
+
+### Auth
+`POST register/request-otp`, `register/verify-otp`, `login`, `refresh`, `logout`, `password/forgot`, `password/reset`, `GET me`
+
+### Users
+`GET/PUT me`, `POST me/avatar`, `GET me/sold-products`, `GET :id`, `GET :id/listings`
+
+### eKYC
+`POST scan-id-front`, `scan-id-back`, `face-match`, `liveness-check`, `submit`, `GET my-status`
+
+### Products
+`GET categories`, `GET /`, `GET :id`, `POST /` (multipart images), `PUT :id`, `POST :id/hide`, `DELETE :id`
+
+### Orders
+`POST /`, `GET my`, `GET :orderId`, `payment-method`, `ship`, `confirm-payment`, `confirm-handover`, `complete`, `cancel`, `dispute`
+
+### Payments
+`checkout`, `simulate-pay`, `GET vnpay-return`, `GET vnpay-ipn`
+
+### Wallet
+`GET /`, `GET/POST withdrawals`
+
+### Chat (Nest — chủ yếu upload; messages SQL legacy)
+`open`, `threads`, messages CRUD, `purchase-request`, `confirm-sale`, **`upload-image`**
+
+### Reviews / Reports / Follows / Notifications
+Đầy đủ CRUD/status như controller tương ứng.
+
+### Admin
+`stats`, `users`, `users/ranking`, `reports`, `ekyc/pending`, `users/locked`, approve/reject eKYC, warn/lock/suspend/ban/punish/delete/unlock, hide product, disputes, withdrawals approve/reject.
+
+> Khi nói “tích hợp API”: **các nghiệp vụ chính marketplace + eKYC + điểm + escrow + admin đều qua Nest**. Chat/comment realtime qua Firebase; favorites local — **nói rõ hybrid**, đừng nói “100% mọi thứ qua Nest”.
+
+---
+
+## O. TRIỂN KHAI & VẬN HÀNH
+
+### O1. "Thứ tự chạy demo?"
+
+> 1. SQL Server (DB `SafeMarketDB` + đã chạy migration `backend/db/migrate-*.sql`)  
+> 2. Backend: `cd backend && npm run start:dev` → `http://localhost:3000/api`  
+> 3. Flutter: `flutter run` (nhớ bật backend bằng `CHAY-BACKEND.bat` trước)
+
+### O2. "Test API?"
+
+> Swagger `/api/docs`, REST Client, hoặc end-to-end trên app.
+
+### O3. "Biến môi trường `.env`?"
+
+> `PORT`, `DB_*`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`, `SMTP_*`, `FPT_AI_*`, `VNPAY_*`, `CORS_ORIGINS` (bắt buộc khi production).  
+> Production enforce JWT mạnh + SMTP + CORS trong `main.ts`.
+
+---
+
+## P. CÂU HỎI PHẢN BIỆN / EDGE CASE
+
+### P1. "Người mua trả tiền rồi không bấm nhận hàng?"
+
+> Tiền còn Holding. Người bán/admin xử lý dispute. Hướng phát triển: auto-release sau X ngày.
+
+### P2. "Spam báo cáo high để trừ điểm?"
+
+> Hiện trừ ngay khi INSERT report high — **hạn chế**. Hướng: chỉ trừ sau khi admin xác nhận báo cáo đúng.
+
+### P3. "OTP RAM mất khi restart backend?"
+
+> Đúng — user xin OTP lại. Production: Redis TTL.
+
+### P4. "Vì sao không MongoDB như đề cương?"
+
+> Chọn SQL Server thống nhất: ACID cho tài chính, `Point_Logs` đủ log hành vi, giảm phức tạp vận hành.
+
+### P5. "Điểm có thể cộng hai lần không?"
+
+> Có rủi ro kỹ thuật: một số chỗ service **vừa update Scores vừa INSERT Point_Logs**, trong khi trigger cũng cập nhật điểm từ log → có thể **nhân đôi** nếu không kiểm soát.  
+> Trả lời trung thực: đã nhận biết; hướng chuẩn là **chỉ ghi Point_Logs, để trigger cập nhật Scores** (single writer).
+
+### P6. "Điểm yếu lớn nhất?" (thành thật)
+
+> 1. Escrow/VNPay sandbox — chưa dòng tiền ngân hàng thật.  
+> 2. eKYC: Face Match chưa gắn UI; liveness token phía client còn yếu nếu bị tấn công.  
+> 3. Ranking tín nhiệm chưa gắn feed marketplace.  
+> 4. Hybrid Firebase + Nest; favorites local.  
+> 5. Unit/E2E test mỏng; OTP/pending checkout in-memory.
+
+---
+
+## Q. HẠN CHẾ & HƯỚNG PHÁT TRIỂN
+
+### Q1. "Phát triển tiếp?"
+
+> 1. Auto-release escrow + cổng thanh toán/ví thật.  
+> 2. Gắn Face Match vào luồng eKYC; harden liveness server-side.  
+> 3. Sort/filter marketplace theo trust score; đồng bộ text UI với công thức.  
+> 4. Single-writer cho điểm (chỉ trigger hoặc chỉ service).  
+> 5. Favorites API; push FCM; tích hợp vận chuyển GHN/Viettel.  
+> 6. Mã hoá CCCD at-rest; CI/CD; pen-test; Redis cho OTP.
+
+### Q2. "Đưa production được chưa?"
+
+> **Chưa.** Đây là **MVP** chứng minh eKYC + Trust Score + Escrow trên marketplace đồ cũ. Production cần HTTPS, bí mật cứng, cổng thanh toán thật, pháp lý dữ liệu cá nhân, test tự động.
+
+---
+
+## R. PHÂN CÔNG NHÓM
+
+> | Trương Trí Hiền (23DH111023) | Lê Tấn Lộc (23DH111948) |
+> |------------------------------|--------------------------|
+> | Backend NestJS, Auth OTP + JWT/refresh | eKYC (FPT OCR + Liveness ML Kit) |
+> | Database + trigger + escrow/orders | Payment VNPay + Wallet |
+> | Flutter Auth / Marketplace / Profile | Scoring + Admin + Kiểm duyệt |
+> | Báo cáo: Phân tích & Kiến trúc | Báo cáo: Thuật toán & Kiểm thử |
+>
+> *(Điều chỉnh đúng phân công thực tế nhóm. Cả hai cần nắm tổng thể để trả lời chéo.)*
+
+---
+
+## S. CÂU HỎI BẪY & MẸO
 
 | Tình huống | Cách xử lý |
 |------------|------------|
-| Không biết câu trả lời | "Dạ em chưa nghĩ tới góc độ này. Em sẽ tìm hiểu thêm và bổ sung vào báo cáo." |
-| Hội đồng nói code sai | "Dạ em ghi nhận. Cụ thể là ở dòng nào ạ? Em xin xem lại và sửa." |
-| Hỏi về phần Lộc làm | "Phần đó bạn Lộc phụ trách, em hiểu khái quát là [...]. Bạn ấy nắm chi tiết hơn em." |
-| Quá khó | "Câu hỏi của thầy/cô sâu hơn phạm vi đồ án của em. Em xin được nghiên cứu thêm." |
-| Hết giờ | "Dạ vì thời gian có hạn, em xin tóm tắt..." |
+| Không biết | "Em chưa nghiên cứu sâu góc này, xin ghi nhận và bổ sung." |
+| Code bị chỉ sai | "Em ghi nhận. Thầy/cô cho em xem cụ thể phần nào để giải thích." |
+| Phần bạn làm | "Bạn [tên] phụ trách chính; em hiểu khái quát là…" |
+| Ngoài phạm vi | "Sâu hơn phạm vi đồ án, em xin nghiên cứu thêm." |
+| Bị dồn bảo mật | Thành thật hạn chế + hướng khắc phục — **không bịa đã an toàn tuyệt đối**. |
 
-**Quy tắc vàng**: Nói chậm, rõ ràng, **biết gì nói nấy**, không cố bịa.
-
----
-
-## K. Câu mở đầu và kết thúc
-
-### Mở đầu (~2 phút)
-
-> "Em xin kính chào quý thầy cô trong hội đồng. Em là Trương Trí Hiền, MSSV 23DH111023.
-> Cùng với bạn Lê Tấn Lộc, chúng em thực hiện đề tài *Xây dựng hệ thống Marketplace đồ cũ an toàn dựa trên mô hình định danh eKYC và thuật toán xếp hạng tín nhiệm người dùng*, dưới sự hướng dẫn của ThS. Lê Thị Minh Nguyện.
->
-> Đề tài giải quyết bài toán **lừa đảo và thiếu lòng tin** trên các sàn đồ cũ hiện nay bằng cách kết hợp **eKYC để xác thực danh tính thực** và **thuật toán xếp hạng tín nhiệm** dựa trên hành vi.
->
-> Sau đây em xin demo hệ thống và trình bày các kết quả chính."
-
-### Kết thúc (~30 giây)
-
-> "Em xin tóm tắt: Đồ án đã hoàn thành 4/4 mục tiêu cụ thể: (1) tích hợp eKYC FPT.AI, (2) xây dựng thuật toán xếp hạng tín nhiệm 4 hạng, (3) backend đầy đủ Auth + CRUD, (4) tích hợp thanh toán VNPay sandbox.
->
-> Em xin cảm ơn quý thầy cô đã lắng nghe. Em sẵn sàng trả lời câu hỏi của hội đồng."
+**Quy tắc vàng:** chậm – rõ – đúng code – không bịa.
 
 ---
 
-## L. Checklist trước vấn đáp
+## T. KỊCH BẢN DEMO (5–8 phút)
 
-| # | Việc | OK? |
-|---|------|-----|
-| 1 | SQL Server service đang chạy (kiểm tra trong Services.msc) | ☐ |
-| 2 | PM2 backend đang `online` (chạy `pm2 list`) | ☐ |
-| 3 | Mở Swagger thử: http://localhost:3000/api/docs | ☐ |
-| 4 | Android Emulator boot xong | ☐ |
-| 5 | Có ít nhất 2 user mẫu trong DB để demo | ☐ |
-| 6 | Có ít nhất 5 sản phẩm mẫu | ☐ |
-| 7 | FPT.AI API key còn quota (test 1 lần OCR ảnh mẫu) | ☐ |
-| 8 | Internet ổn định | ☐ |
-| 9 | Sạc đầy pin laptop hoặc cắm điện | ☐ |
-| 10 | In tài liệu QA này mang theo | ☐ |
-| 11 | In sẵn slide thuyết trình | ☐ |
-| 12 | Có sẵn ảnh CCCD test (không phải CCCD thật của mình) | ☐ |
+1. **Đăng nhập** admin + 1 user Verified (hoặc đăng ký OTP nếu SMTP/console sẵn).  
+2. **Marketplace** — lọc/tìm, mở chi tiết, vuốt nhiều ảnh (nếu tin mới).  
+3. **eKYC** (nếu user Pending) — OCR + liveness → Pending → admin duyệt.  
+4. **Đăng bán** — chọn nhiều ảnh → đăng.  
+5. **Chat Firebase** — gửi tin / thẻ sản phẩm → đặt mua.  
+6. **Thanh toán** — simulate-pay hoặc VNPay sandbox → complete → điểm + ví.  
+7. **Admin** — ranking, báo cáo, dispute (nếu còn thời gian).  
+8. (Tuỳ chọn) Mở Firebase Console bung `safemarket` chứng minh realtime.
 
-**Chúc nhóm vấn đáp thành công!**
+---
+
+## U. CHECKLIST TRƯỚC VẤN ĐÁP
+
+- [ ] SQL Server chạy, DB đã migrate (`migrate-*.sql`).  
+- [ ] Backend `npm run start:dev` → Swagger mở được.  
+- [ ] Flutter chạy được, login demo OK.  
+- [ ] Nhớ bảng điểm **đúng code** (G1) — không nói KYC +100 nếu chưa code.  
+- [ ] Nhớ: JWT **15m** + refresh **7d** + secure storage.  
+- [ ] Nhớ: chat = **Firebase**; Face Match = backend có, UI chưa gắn.  
+- [ ] Nhớ: escrow = demo/sandbox, không phải ngân hàng thật.  
+- [ ] In tài liệu này + mang sơ đồ kiến trúc / ERD.  
+- [ ] Phân công: ai demo phần nào đã thống nhất.
+
+---
+
+## PHỤ LỤC — STACK PHIÊN BẢN (gợi ý nêu khi hỏi)
+
+- **Flutter:** SDK ^3.12; `http`, `flutter_secure_storage`, `firebase_core`/`firebase_database`, `camera`, `google_mlkit_face_detection`, `image_picker`…  
+- **Backend:** NestJS ^10.4, TypeORM ^0.3, mssql, JWT/passport, bcrypt, throttler, swagger, nodemailer, multer, helmet.  
+- **DB:** Microsoft SQL Server — `SafeMarketDB`.  
+- **Firebase project:** `safemarketekyc-38009`.
+
+---
+
+*Tài liệu cập nhật theo mã nguồn SafeMarket-Ekyc — dùng để học và bảo vệ. Khi code thay đổi, sửa lại các mục đánh dấu ⭐ trước.*

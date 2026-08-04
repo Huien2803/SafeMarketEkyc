@@ -210,13 +210,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   void _goToApp() {
-    final navigator = Navigator.of(context);
-    if (navigator.canPop()) {
-      navigator.pop();
-      return;
-    }
-    navigator.pushReplacement(
+    // Luôn về trang chủ Marketplace và xoá toàn bộ stack admin, tránh trường
+    // hợp Drawer (mobile) thêm local history entry khiến canPop()=true (khi đó
+    // pop() chỉ đóng Drawer chứ không rời màn admin).
+    Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute<void>(builder: (_) => const MarketplaceHomeScreen()),
+      (route) => false,
     );
   }
 
@@ -226,68 +225,81 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: Row(
-        children: [
-          if (isWide) _AdminSidebar(
-            selectedIndex: _selectedMenu,
-            items: _menuItems,
-            onSelect: (i) => setState(() => _selectedMenu = i),
-            onBackToApp: _goToApp,
-          ),
-          Expanded(
-            child: Column(
-              children: [
-                _AdminHeader(
-                  showMenuButton: !isWide,
-                  searchQuery: _searchQuery,
-                  onSearchChanged: (v) => setState(() => _searchQuery = v),
-                  onRefresh: _load,
-                  onBackToApp: _goToApp,
-                ),
-                if (_loadError != null)
-                  MaterialBanner(
-                    content: Text(_loadError!),
-                    actions: [
-                      TextButton(onPressed: _load, child: const Text('Thử lại')),
-                    ],
-                  ),
-                Expanded(
-                  child: RefreshIndicator(
+      body: SafeArea(
+        child: Row(
+          children: [
+            if (isWide)
+              _AdminSidebar(
+                selectedIndex: _selectedMenu,
+                items: _menuItems,
+                onSelect: (i) => setState(() => _selectedMenu = i),
+                onBackToApp: _goToApp,
+              ),
+            Expanded(
+              child: Column(
+                children: [
+                  _AdminHeader(
+                    showMenuButton: !isWide,
+                    searchQuery: _searchQuery,
+                    onSearchChanged: (v) => setState(() => _searchQuery = v),
                     onRefresh: _load,
-                    child: SingleChildScrollView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _PageTitleRow(
-                            menuIndex: _selectedMenu,
-                            onExport: _exportReport,
-                            onRefresh: _load,
-                          ),
-                          const SizedBox(height: 24),
-                          _buildMenuContent(),
-                        ],
+                    onBackToApp: _goToApp,
+                  ),
+                  if (_loadError != null)
+                    MaterialBanner(
+                      content: Text(_loadError!),
+                      actions: [
+                        TextButton(onPressed: _load, child: const Text('Thử lại')),
+                      ],
+                    ),
+                  Expanded(
+                    child: RefreshIndicator(
+                      onRefresh: _load,
+                      child: SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: EdgeInsets.fromLTRB(
+                          isWide ? 24 : 16,
+                          16,
+                          isWide ? 24 : 16,
+                          24,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _PageTitleRow(
+                              menuIndex: _selectedMenu,
+                              onExport: _exportReport,
+                              onRefresh: _load,
+                            ),
+                            const SizedBox(height: 16),
+                            _buildMenuContent(),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
       drawer: isWide
           ? null
           : Drawer(
-              child: _AdminSidebar(
-                selectedIndex: _selectedMenu,
-                items: _menuItems,
-                onSelect: (i) {
-                  setState(() => _selectedMenu = i);
-                  Navigator.pop(context);
-                },
-                onBackToApp: _goToApp,
+              child: SafeArea(
+                child: _AdminSidebar(
+                  selectedIndex: _selectedMenu,
+                  items: _menuItems,
+                  onSelect: (i) {
+                    setState(() => _selectedMenu = i);
+                    Navigator.pop(context);
+                  },
+                  onBackToApp: () {
+                    Navigator.pop(context);
+                    _goToApp();
+                  },
+                ),
               ),
             ),
     );
@@ -430,11 +442,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(title),
-        content: TextField(
-          controller: ctrl,
-          decoration: InputDecoration(hintText: hint),
-          maxLines: 2,
-          autofocus: true,
+        content: SingleChildScrollView(
+          child: TextField(
+            controller: ctrl,
+            decoration: InputDecoration(
+              hintText: hint,
+              border: const OutlineInputBorder(),
+            ),
+            maxLines: 3,
+            autofocus: true,
+          ),
         ),
         actions: [
           TextButton(
@@ -448,7 +465,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ],
       ),
     );
-    ctrl.dispose();
+    // Dispose sau frame để tránh lỗi controller khi dialog đang đóng.
+    WidgetsBinding.instance.addPostFrameCallback((_) => ctrl.dispose());
     return result;
   }
 
@@ -693,7 +711,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           SnackBar(
             content: Text(
               mode == 'soft'
-                  ? 'Đã ẩn danh & vô hiệu hóa tài khoản (giữ lịch sử giao dịch)'
+                  ? 'Đã xóa tài khoản (ẩn danh, không đăng nhập được; giữ lịch sử nếu có)'
                   : 'Đã xóa tài khoản hoàn toàn',
             ),
           ),
@@ -710,6 +728,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     try {
       await AdminService.instance.unlockUser(userId);
       await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Đã mở khóa tài khoản')),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
@@ -1008,102 +1031,130 @@ class _AdminHeader extends StatelessWidget {
     // các thành phần phụ (tên admin, chuông thông báo) để tránh tràn ngang.
     final narrow = showMenuButton;
 
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: narrow ? 8 : 24,
-        vertical: 12,
-      ),
+    return Material(
       color: AppColors.white,
-      child: Row(
-        children: [
-          if (narrow)
-            Builder(
-              builder: (ctx) => IconButton(
-                icon: const Icon(Icons.menu),
-                tooltip: 'Menu',
-                onPressed: () => Scaffold.of(ctx).openDrawer(),
-              ),
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.arrow_back),
-              tooltip: 'Về SafeMarket',
-              onPressed: onBackToApp,
-            ),
-          Expanded(
-            child: TextField(
-              onChanged: onSearchChanged,
-              decoration: InputDecoration(
-                hintText: narrow
-                    ? 'Tìm người dùng...'
-                    : 'Tìm kiếm người dùng theo tên hoặc email...',
-                prefixIcon: Icon(Icons.search, color: AppColors.textMuted),
-                suffixIcon: searchQuery.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear, size: 18),
-                        onPressed: () => onSearchChanged(''),
-                      )
-                    : null,
-                filled: true,
-                fillColor: AppColors.background,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(vertical: 0),
-              ),
-            ),
+      elevation: 0,
+      child: Container(
+        padding: EdgeInsets.fromLTRB(narrow ? 4 : 20, 8, narrow ? 8 : 20, 8),
+        decoration: const BoxDecoration(
+          color: AppColors.white,
+          border: Border(
+            bottom: BorderSide(color: Color(0xFFE5E7EB)),
           ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Làm mới',
-            onPressed: onRefresh,
-          ),
-          if (!narrow) ...[
-            const SizedBox(width: 8),
-            IconButton(
-              icon: const Icon(Icons.notifications_outlined),
-              onPressed: () {},
-            ),
-            const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  adminName,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary,
-                  ),
+        ),
+        child: Row(
+          children: [
+            if (narrow)
+              Builder(
+                builder: (ctx) => IconButton(
+                  icon: const Icon(Icons.menu_rounded),
+                  tooltip: 'Menu',
+                  onPressed: () => Scaffold.of(ctx).openDrawer(),
                 ),
-                Text(
-                  'HỆ THỐNG SAFEMARKET',
-                  style: TextStyle(
-                    fontSize: 10,
+              )
+            else
+              IconButton(
+                icon: const Icon(Icons.arrow_back_rounded),
+                tooltip: 'Về SafeMarket',
+                onPressed: onBackToApp,
+              ),
+            Expanded(
+              child: TextField(
+                onChanged: onSearchChanged,
+                decoration: InputDecoration(
+                  hintText: narrow
+                      ? 'Tìm người dùng...'
+                      : 'Tìm kiếm người dùng theo tên hoặc email...',
+                  hintStyle: const TextStyle(
+                    fontSize: 14,
                     color: AppColors.textMuted,
-                    letterSpacing: 0.5,
                   ),
+                  prefixIcon: const Icon(
+                    Icons.search_rounded,
+                    color: AppColors.textMuted,
+                    size: 22,
+                  ),
+                  suffixIcon: searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear_rounded, size: 18),
+                          onPressed: () => onSearchChanged(''),
+                        )
+                      : null,
+                  filled: true,
+                  fillColor: AppColors.background,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(
+                      color: AppColors.primary,
+                      width: 1.2,
+                    ),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  isDense: true,
                 ),
-              ],
-            ),
-            const SizedBox(width: 12),
-          ] else
-            const SizedBox(width: 4),
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: const Color(0xFFBFDBFE),
-            child: Text(
-              initials,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: AppColors.primary,
-                fontSize: 12,
               ),
             ),
-          ),
-        ],
+            const SizedBox(width: 4),
+            IconButton(
+              icon: const Icon(Icons.refresh_rounded),
+              tooltip: 'Làm mới',
+              onPressed: onRefresh,
+            ),
+            if (!narrow) ...[
+              IconButton(
+                icon: const Icon(Icons.notifications_outlined),
+                onPressed: () {},
+              ),
+              const SizedBox(width: 4),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    adminName,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const Text(
+                    'HỆ THỐNG SAFEMARKET',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: AppColors.textMuted,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(width: 10),
+            ],
+            CircleAvatar(
+              radius: narrow ? 16 : 18,
+              backgroundColor: const Color(0xFFDBEAFE),
+              child: Text(
+                initials,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primary,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1144,22 +1195,27 @@ class _PageTitleRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final narrow = MediaQuery.sizeOf(context).width < 520;
     final titleBlock = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           _title,
-          style: const TextStyle(
-            fontSize: 24,
+          style: TextStyle(
+            fontSize: narrow ? 22 : 24,
             fontWeight: FontWeight.w800,
             color: AppColors.textPrimary,
+            height: 1.2,
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 4),
         Text(
-          'Chào mừng trở lại, đây là những gì đang diễn ra hôm nay.',
-          style: TextStyle(
-            fontSize: 14,
+          narrow
+              ? 'Quản trị SafeMarket — thao tác bên dưới.'
+              : 'Chào mừng trở lại, đây là những gì đang diễn ra hôm nay.',
+          style: const TextStyle(
+            fontSize: 13,
+            height: 1.4,
             color: AppColors.textSecondary,
           ),
         ),
@@ -1169,29 +1225,37 @@ class _PageTitleRow extends StatelessWidget {
     final exportBtn = ElevatedButton.icon(
       onPressed: onExport,
       icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
-      label: const Text('Xuất PDF'),
+      label: Text(narrow ? 'PDF' : 'Xuất PDF'),
       style: ElevatedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        elevation: 0,
+        padding: EdgeInsets.symmetric(
+          horizontal: narrow ? 14 : 20,
+          vertical: 12,
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Mobile hẹp: xếp tiêu đề trên, nút Xuất PDF + làm mới ở dưới.
         if (constraints.maxWidth < 520) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               titleBlock,
-              const SizedBox(height: 14),
+              const SizedBox(height: 12),
               Row(
                 children: [
                   Expanded(child: exportBtn),
                   const SizedBox(width: 8),
-                  IconButton(
-                    onPressed: onRefresh,
-                    icon: const Icon(Icons.refresh),
-                    tooltip: 'Làm mới dữ liệu',
+                  Material(
+                    color: AppColors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    child: IconButton(
+                      onPressed: onRefresh,
+                      icon: const Icon(Icons.refresh_rounded),
+                      tooltip: 'Làm mới dữ liệu',
+                    ),
                   ),
                 ],
               ),
@@ -1206,7 +1270,7 @@ class _PageTitleRow extends StatelessWidget {
             const SizedBox(width: 8),
             IconButton(
               onPressed: onRefresh,
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(Icons.refresh_rounded),
               tooltip: 'Làm mới dữ liệu',
             ),
           ],
@@ -1648,8 +1712,10 @@ class _UsersTableCard extends StatelessWidget {
     if (loading && users.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
+    final narrow = MediaQuery.sizeOf(context).width < 700;
+
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(narrow ? 14 : 20),
       decoration: AppDecorations.card(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1658,7 +1724,7 @@ class _UsersTableCard extends StatelessWidget {
             children: [
               const Expanded(
                 child: Text(
-                  'Quản lý người dùng gần đây',
+                  'Quản lý người dùng',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -1667,63 +1733,202 @@ class _UsersTableCard extends StatelessWidget {
                   ),
                 ),
               ),
-              TextButton(onPressed: () {}, child: const Text('Xem tất cả')),
+              Text(
+                '${users.length} tài khoản',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textSecondary,
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 16),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              headingTextStyle: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.5,
-                color: AppColors.textMuted,
-              ),
-              columns: const [
-                DataColumn(label: Text('NGƯỜI DÙNG')),
-                DataColumn(label: Text('TRẠNG THÁI')),
-                DataColumn(label: Text('TRẠNG THÁI EKYC')),
-                DataColumn(label: Text('ĐIỂM TÍN NHIỆM')),
-                DataColumn(label: Text('GIAO DỊCH')),
-                DataColumn(label: Text('HÀNH ĐỘNG')),
-              ],
-              rows: users
-                  .map(
-                    (u) => DataRow(
-                      cells: [
-                        DataCell(_UserCellApi(user: u)),
-                        DataCell(_AccountStatusBadge(
-                          status: u.accountStatus,
-                          lockedUntil: u.lockedUntil,
-                        )),
-                        DataCell(_EkycBadge(
-                            verified: u.kycStatus == 'Verified')),
-                        DataCell(
-                          SizedBox(
-                            width: 140,
-                            child: TrustScoreBar(score: u.trustScore),
-                          ),
-                        ),
-                        DataCell(Text('${u.orders}')),
-                        DataCell(
-                          _UserActionsMenu(
-                            user: u,
-                            onWarn: onWarn,
-                            onLock: onLock,
-                            onSuspend: onSuspend,
-                            onUnlock: onUnlock,
-                            onBan: onBan,
-                            onPunish: onPunish,
-                            onDelete: onDelete,
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                  .toList(),
-            ),
+          const SizedBox(height: 4),
+          const Text(
+            'Chọn “Thao tác quản trị” trên từng tài khoản để cảnh cáo, trừ điểm, khóa, cấm hoặc xóa.',
+            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
           ),
+          const SizedBox(height: 14),
+          if (narrow)
+            ...users.map(
+              (u) => _UserMobileTile(
+                user: u,
+                onWarn: onWarn,
+                onLock: onLock,
+                onSuspend: onSuspend,
+                onUnlock: onUnlock,
+                onBan: onBan,
+                onPunish: onPunish,
+                onDelete: onDelete,
+              ),
+            )
+          else
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                headingTextStyle: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.5,
+                  color: AppColors.textMuted,
+                ),
+                columns: const [
+                  DataColumn(label: Text('NGƯỜI DÙNG')),
+                  DataColumn(label: Text('TRẠNG THÁI')),
+                  DataColumn(label: Text('TRẠNG THÁI EKYC')),
+                  DataColumn(label: Text('ĐIỂM TÍN NHIỆM')),
+                  DataColumn(label: Text('GIAO DỊCH')),
+                  DataColumn(label: Text('HÀNH ĐỘNG')),
+                ],
+                rows: users
+                    .map(
+                      (u) => DataRow(
+                        cells: [
+                          DataCell(_UserCellApi(user: u)),
+                          DataCell(_AccountStatusBadge(
+                            status: u.accountStatus,
+                            lockedUntil: u.lockedUntil,
+                          )),
+                          DataCell(_EkycBadge(
+                              verified: u.kycStatus == 'Verified')),
+                          DataCell(
+                            SizedBox(
+                              width: 140,
+                              child: TrustScoreBar(score: u.trustScore),
+                            ),
+                          ),
+                          DataCell(Text('${u.orders}')),
+                          DataCell(
+                            _UserActionsMenu(
+                              user: u,
+                              onWarn: onWarn,
+                              onLock: onLock,
+                              onSuspend: onSuspend,
+                              onUnlock: onUnlock,
+                              onBan: onBan,
+                              onPunish: onPunish,
+                              onDelete: onDelete,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Thẻ người dùng trên mobile — nút Xóa hiện rõ.
+class _UserMobileTile extends StatelessWidget {
+  const _UserMobileTile({
+    required this.user,
+    this.onWarn,
+    this.onLock,
+    this.onSuspend,
+    this.onUnlock,
+    this.onBan,
+    this.onPunish,
+    this.onDelete,
+  });
+
+  final AdminUserRow user;
+  final void Function(AdminUserRow user)? onWarn;
+  final void Function(AdminUserRow user)? onLock;
+  final void Function(AdminUserRow user)? onSuspend;
+  final void Function(int userId)? onUnlock;
+  final void Function(AdminUserRow user)? onBan;
+  final void Function(AdminUserRow user)? onPunish;
+  final void Function(AdminUserRow user)? onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final name = user.displayName ?? user.email;
+    final isDeleted = user.accountStatus == 'Deleted';
+    final initial =
+        name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: const Color(0xFFDBEAFE),
+                child: Text(
+                  initial,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                    Text(
+                      user.email,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _AccountStatusBadge(
+                status: user.accountStatus,
+                lockedUntil: user.lockedUntil,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _EkycBadge(verified: user.kycStatus == 'Verified'),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TrustScoreBar(score: user.trustScore),
+              ),
+            ],
+          ),
+          if (!isDeleted) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: _UserActionsMenu(
+                user: user,
+                showAsButton: true,
+                onWarn: onWarn,
+                onLock: onLock,
+                onSuspend: onSuspend,
+                onUnlock: onUnlock,
+                onBan: onBan,
+                onPunish: onPunish,
+                onDelete: onDelete,
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1845,6 +2050,7 @@ class _AccountStatusBadge extends StatelessWidget {
 class _UserActionsMenu extends StatelessWidget {
   const _UserActionsMenu({
     required this.user,
+    this.showAsButton = false,
     this.onWarn,
     this.onLock,
     this.onSuspend,
@@ -1855,6 +2061,7 @@ class _UserActionsMenu extends StatelessWidget {
   });
 
   final AdminUserRow user;
+  final bool showAsButton;
   final void Function(AdminUserRow user)? onWarn;
   final void Function(AdminUserRow user)? onLock;
   final void Function(AdminUserRow user)? onSuspend;
@@ -1863,12 +2070,151 @@ class _UserActionsMenu extends StatelessWidget {
   final void Function(AdminUserRow user)? onPunish;
   final void Function(AdminUserRow user)? onDelete;
 
+  /// Chạy sau khi đóng menu/sheet — tránh lỗi “deactivated context” / trang trắng.
+  void _runAfterClose(VoidCallback? action) {
+    if (action == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      action();
+    });
+  }
+
+  Future<void> _openActions(BuildContext context) async {
+    final isActive = user.accountStatus == 'Active';
+    final name = user.displayName ?? user.email;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) {
+        Widget actionTile({
+          required IconData icon,
+          required Color color,
+          required String title,
+          String? subtitle,
+          required VoidCallback onTap,
+        }) {
+          return ListTile(
+            leading: CircleAvatar(
+              radius: 18,
+              backgroundColor: color.withValues(alpha: 0.12),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            title: Text(
+              title,
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+            ),
+            subtitle: subtitle == null
+                ? null
+                : Text(subtitle, style: const TextStyle(fontSize: 12)),
+            onTap: () {
+              Navigator.pop(sheetCtx);
+              _runAfterClose(onTap);
+            },
+          );
+        }
+
+        return SafeArea(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Thao tác quản trị',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          name,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  if (isActive && onWarn != null)
+                    actionTile(
+                      icon: Icons.campaign_outlined,
+                      color: AppColors.warning,
+                      title: 'Cảnh cáo',
+                      subtitle: 'Gửi cảnh báo, không trừ điểm',
+                      onTap: () => onWarn!(user),
+                    ),
+                  if (isActive && onPunish != null)
+                    actionTile(
+                      icon: Icons.remove_circle_outline,
+                      color: AppColors.textPrimary,
+                      title: 'Trừ điểm tín nhiệm',
+                      onTap: () => onPunish!(user),
+                    ),
+                  if (isActive && onSuspend != null)
+                    actionTile(
+                      icon: Icons.timer_outlined,
+                      color: AppColors.warning,
+                      title: 'Đình chỉ tạm thời',
+                      subtitle: 'Khóa có thời hạn, tự mở lại',
+                      onTap: () => onSuspend!(user),
+                    ),
+                  if (isActive && onLock != null)
+                    actionTile(
+                      icon: Icons.block,
+                      color: AppColors.textPrimary,
+                      title: 'Khóa vô thời hạn',
+                      onTap: () => onLock!(user),
+                    ),
+                  if (!isActive && onUnlock != null)
+                    actionTile(
+                      icon: Icons.lock_open_rounded,
+                      color: AppColors.trustGreen,
+                      title: 'Mở khóa',
+                      onTap: () => onUnlock!(user.userId),
+                    ),
+                  if (onBan != null)
+                    actionTile(
+                      icon: Icons.gavel,
+                      color: AppColors.danger,
+                      title: 'Cấm vĩnh viễn',
+                      onTap: () => onBan!(user),
+                    ),
+                  if (onDelete != null) ...[
+                    const Divider(height: 1),
+                    actionTile(
+                      icon: Icons.delete_forever_rounded,
+                      color: AppColors.danger,
+                      title: 'Xóa tài khoản',
+                      subtitle: 'Không thể hoàn tác dễ dàng',
+                      onTap: () => onDelete!(user),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final isActive = user.accountStatus == 'Active';
     final isDeleted = user.accountStatus == 'Deleted';
-
-    // Tài khoản đã xóa mềm: không còn thao tác quản lý nào.
     if (isDeleted) {
       return const SizedBox(
         width: 40,
@@ -1876,91 +2222,35 @@ class _UserActionsMenu extends StatelessWidget {
       );
     }
 
-    return PopupMenuButton<String>(
-      tooltip: 'Quản lý người dùng',
-      icon: const Icon(Icons.more_vert, size: 20),
-      onSelected: (action) {
-        switch (action) {
-          case 'warn':
-            onWarn?.call(user);
-          case 'lock':
-            onLock?.call(user);
-          case 'suspend':
-            onSuspend?.call(user);
-          case 'unlock':
-            onUnlock?.call(user.userId);
-          case 'ban':
-            onBan?.call(user);
-          case 'punish':
-            onPunish?.call(user);
-          case 'delete':
-            onDelete?.call(user);
-        }
-      },
-      itemBuilder: (ctx) => [
-        if (isActive && onWarn != null)
-          const PopupMenuItem(
-            value: 'warn',
-            child: ListTile(
-              leading: Icon(Icons.campaign_outlined, size: 20, color: AppColors.warning),
-              title: Text('Cảnh cáo'),
-              contentPadding: EdgeInsets.zero,
-            ),
-          ),
-        if (isActive && onPunish != null)
-          const PopupMenuItem(
-            value: 'punish',
-            child: ListTile(
-              leading: Icon(Icons.remove_circle_outline, size: 20),
-              title: Text('Trừ điểm tín nhiệm'),
-              contentPadding: EdgeInsets.zero,
-            ),
-          ),
-        if (isActive && onSuspend != null)
-          const PopupMenuItem(
-            value: 'suspend',
-            child: ListTile(
-              leading: Icon(Icons.timer_outlined, size: 20, color: AppColors.warning),
-              title: Text('Đình chỉ tạm thời'),
-              contentPadding: EdgeInsets.zero,
-            ),
-          ),
-        if (isActive && onLock != null)
-          const PopupMenuItem(
-            value: 'lock',
-            child: ListTile(
-              leading: Icon(Icons.block, size: 20),
-              title: Text('Khóa vô thời hạn'),
-              contentPadding: EdgeInsets.zero,
-            ),
-          ),
-        if (!isActive && onUnlock != null)
-          const PopupMenuItem(
-            value: 'unlock',
-            child: ListTile(
-              leading: Icon(Icons.lock_open, size: 20, color: AppColors.trustGreen),
-              title: Text('Mở khóa'),
-              contentPadding: EdgeInsets.zero,
-            ),
-          ),
-        if (onBan != null)
-          const PopupMenuItem(
-            value: 'ban',
-            child: ListTile(
-              leading: Icon(Icons.gavel, size: 20, color: AppColors.danger),
-              title: Text('Cấm vĩnh viễn'),
-              contentPadding: EdgeInsets.zero,
-            ),
-          ),
+    if (showAsButton) {
+      return FilledButton.tonalIcon(
+        onPressed: () => _openActions(context),
+        icon: const Icon(Icons.manage_accounts_outlined, size: 20),
+        label: const Text('Thao tác quản trị'),
+        style: FilledButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+        ),
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
         if (onDelete != null)
-          const PopupMenuItem(
-            value: 'delete',
-            child: ListTile(
-              leading: Icon(Icons.delete_outline, size: 20, color: AppColors.danger),
-              title: Text('Xóa tài khoản'),
-              contentPadding: EdgeInsets.zero,
+          IconButton(
+            tooltip: 'Xóa tài khoản',
+            icon: const Icon(
+              Icons.delete_outline_rounded,
+              color: AppColors.danger,
+              size: 22,
             ),
+            onPressed: () => _runAfterClose(() => onDelete!(user)),
           ),
+        IconButton(
+          tooltip: 'Thao tác quản trị',
+          icon: const Icon(Icons.more_horiz_rounded, size: 22),
+          onPressed: () => _openActions(context),
+        ),
       ],
     );
   }
@@ -2008,42 +2298,130 @@ class _PendingEkycCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (loading && items.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
+      return const Padding(
+        padding: EdgeInsets.all(40),
+        child: Center(child: CircularProgressIndicator()),
+      );
     }
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       decoration: AppDecorations.card(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Hồ sơ eKYC chờ duyệt',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 16),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Hồ sơ eKYC chờ duyệt',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.ekycPendingBg,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '${items.length}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.ekycPendingText,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
           if (items.isEmpty)
-            const Text('Không có hồ sơ chờ duyệt')
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text(
+                  'Không có hồ sơ chờ duyệt',
+                  style: TextStyle(color: AppColors.textSecondary),
+                ),
+              ),
+            )
           else
             ...items.map((e) {
               final userId = (e['userId'] as num).toInt();
               final hasProfile = e['hasProfile'] as bool? ?? true;
               final fullName = e['fullName'] as String? ?? '';
               final idNumber = e['idNumber'] as String? ?? '';
-              final subtitle = hasProfile && (fullName.isNotEmpty || idNumber.isNotEmpty)
+              final displayName = e['displayName'] as String? ?? '';
+              final subtitle = hasProfile &&
+                      (fullName.isNotEmpty || idNumber.isNotEmpty)
                   ? '$fullName • $idNumber'
                   : hasProfile
                       ? 'Đã nộp hồ sơ'
                       : 'Chưa có file CMND — duyệt theo trạng thái tài khoản';
-              return ListTile(
-                title: Text(e['displayName'] as String? ?? ''),
-                subtitle: Text(subtitle),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
+              final initial = displayName.trim().isNotEmpty
+                  ? displayName.trim().substring(0, 1).toUpperCase()
+                  : '?';
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+                decoration: BoxDecoration(
+                  color: AppColors.background,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                ),
+                child: Row(
                   children: [
+                    CircleAvatar(
+                      radius: 20,
+                      backgroundColor: const Color(0xFFDBEAFE),
+                      child: Text(
+                        initial,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            displayName,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            subtitle,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              height: 1.35,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                     IconButton(
-                      icon: const Icon(Icons.check, color: Colors.green),
+                      tooltip: 'Duyệt',
+                      icon: const Icon(
+                        Icons.check_circle_rounded,
+                        color: AppColors.trustGreen,
+                      ),
                       onPressed: () => onApprove(userId),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close, color: Colors.red),
+                      tooltip: 'Từ chối',
+                      icon: const Icon(
+                        Icons.cancel_rounded,
+                        color: AppColors.danger,
+                      ),
                       onPressed: () => onReject(userId),
                     ),
                   ],

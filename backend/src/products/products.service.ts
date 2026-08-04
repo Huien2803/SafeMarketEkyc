@@ -145,7 +145,7 @@ export class ProductsService {
   async createProduct(
     sellerId: number,
     dto: CreateProductDto,
-    file?: Express.Multer.File,
+    files?: Express.Multer.File[],
   ): Promise<Record<string, unknown>> {
     const seller = await this.userRepo.findOne({ where: { userId: sellerId } });
     if (!seller || seller.kycStatus !== 'Verified') {
@@ -156,10 +156,10 @@ export class ProductsService {
 
     await this.categoriesService.findOne(dto.categoryId);
 
-    let thumbnailUrl: string | null = null;
-    if (file?.filename) {
-      thumbnailUrl = toPublicUploadPath(file.filename);
-    }
+    const imageUrls = (files ?? [])
+      .filter((f) => f?.filename)
+      .map((f) => toPublicUploadPath(f.filename));
+    const thumbnailUrl = imageUrls.length > 0 ? imageUrls[0] : null;
 
     const product = this.productRepo.create({
       title: dto.title,
@@ -174,12 +174,14 @@ export class ProductsService {
     });
 
     const saved = await this.productRepo.save(product);
-    if (thumbnailUrl) {
-      await this.imageRepo.save({
-        productId: saved.productId,
-        imageUrl: thumbnailUrl,
-        sortOrder: 0,
-      });
+    if (imageUrls.length > 0) {
+      await this.imageRepo.save(
+        imageUrls.map((url, index) => ({
+          productId: saved.productId,
+          imageUrl: url,
+          sortOrder: index,
+        })),
+      );
     }
     await this.notificationsService.notifyNewProduct(sellerId, saved);
     return this.findOne(Number(saved.productId));

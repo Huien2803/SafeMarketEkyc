@@ -145,13 +145,16 @@ class ChatService {
     } catch (e) {
       final msg = e.toString();
       if (msg.contains('đã có đơn') ||
+          msg.contains('đã có người đặt') ||
+          msg.contains('không thể đặt lại') ||
           msg.contains('Conflict') ||
           msg.contains('409')) {
         throw Exception(
-          'Sản phẩm đã có đơn đặt mua. Hủy đơn cũ hoặc chọn sản phẩm khác.',
+          'Sản phẩm đã có người đặt hàng. Bạn không thể đặt lại.',
         );
       }
       if (msg.contains('không còn khả dụng') ||
+          msg.contains('đã được bán') ||
           msg.contains('Reserved') ||
           msg.contains('Sold')) {
         throw Exception('Sản phẩm không còn khả dụng để đặt mua.');

@@ -7,81 +7,98 @@ import 'package:safemarket_app/models/ekyc_models.dart';
 import 'package:safemarket_app/services/api_config.dart';
 import 'package:safemarket_app/services/auth_service.dart';
 
-/// Service gọi 5 endpoint eKYC của backend NestJS.
-///
-/// Luồng chuẩn dùng trong UI:
-///   1. user chụp ảnh mặt trước CCCD  -> scanIdFront(file)  -> hiện form đã điền sẵn
-///   2. user chụp ảnh mặt sau CCCD     -> scanIdBack(file)
-///   3. user selfie                    -> faceMatch(idFront, selfie) -> similarity
-///   4. user nhấn "Xác nhận"           -> submit(...) -> Verified
+/// Client eKYC — luồng gắn session server (kiểu ngân hàng / VNeID):
+///   startSession → scanFront → scanBack → completeLiveness → faceMatch → submit
 class EkycService {
   EkycService._();
   static final EkycService instance = EkycService._();
 
-  Future<IdCardFront> scanIdFront(File image) async {
-    final json = await _uploadSingle('/ekyc/scan-id-front', 'image', image);
+  Future<String> startSession() async {
+    final json = await _postJson('/ekyc/session/start', {});
+    return (json['sessionId'] ?? '').toString();
+  }
+
+  Future<IdCardFront> scanIdFront({
+    required String sessionId,
+    required File image,
+  }) async {
+    final json = await _uploadWithFields(
+      '/ekyc/scan-id-front',
+      'image',
+      image,
+      fields: {'sessionId': sessionId},
+    );
     return IdCardFront.fromJson(json);
   }
 
-  Future<IdCardBack> scanIdBack(File image) async {
-    final json = await _uploadSingle('/ekyc/scan-id-back', 'image', image);
+  Future<IdCardBack> scanIdBack({
+    required String sessionId,
+    required File image,
+  }) async {
+    final json = await _uploadWithFields(
+      '/ekyc/scan-id-back',
+      'image',
+      image,
+      fields: {'sessionId': sessionId},
+    );
     return IdCardBack.fromJson(json);
   }
 
-  Future<Map<String, dynamic>> livenessCheck(File selfie) async {
-    return _uploadSingle('/ekyc/liveness-check', 'selfie', selfie);
+  Future<({String livenessToken, int recognitionPoints})> completeLiveness({
+    required String sessionId,
+    required File selfie,
+    required int recognitionPoints,
+  }) async {
+    final json = await _uploadWithFields(
+      '/ekyc/liveness/complete',
+      'selfie',
+      selfie,
+      fields: {
+        'sessionId': sessionId,
+        'recognitionPoints': '$recognitionPoints',
+      },
+    );
+    return (
+      livenessToken: (json['livenessToken'] ?? '').toString(),
+      recognitionPoints: (json['recognitionPoints'] as num?)?.toInt() ??
+          recognitionPoints,
+    );
   }
 
   Future<FaceMatchResult> faceMatch({
-    required File idCard,
-    required File selfie,
+    required String sessionId,
+    File? idCard,
+    File? selfie,
   }) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/ekyc/face-match');
     final req = http.MultipartRequest('POST', uri)
       ..headers['Authorization'] = 'Bearer ${_requireToken()}'
-      ..files.add(await _multipart('idCard', idCard))
-      ..files.add(await _multipart('selfie', selfie));
-
+      ..fields['sessionId'] = sessionId;
+    if (idCard != null) {
+      req.files.add(await _multipart('idCard', idCard));
+    }
+    if (selfie != null) {
+      req.files.add(await _multipart('selfie', selfie));
+    }
     final json = await _send(req);
     return FaceMatchResult.fromJson(json);
   }
 
   Future<EkycStatus> submit({
-    required String idNumber,
-    required String fullName,
+    required String sessionId,
+    required String livenessToken,
     required String dob,
     required String address,
-    required int recognitionPoints,
-    required String livenessToken,
+    String? home,
   }) async {
-    final token = _requireToken();
-    final uri = Uri.parse('${ApiConfig.baseUrl}/ekyc/submit');
-    final res = await http
-        .post(
-          uri,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $token',
-          },
-          body: jsonEncode({
-            'idNumber': idNumber,
-            'fullName': fullName,
-            'dob': dob,
-            'address': address,
-            'recognitionPoints': recognitionPoints,
-            'livenessToken': livenessToken,
-          }),
-        )
-        .timeout(ApiConfig.timeout);
-
-    final decoded = res.body.isNotEmpty
-        ? jsonDecode(res.body) as Map<String, dynamic>
-        : <String, dynamic>{};
-
-    if (res.statusCode >= 200 && res.statusCode < 300) {
-      return EkycStatus.fromJson(decoded);
-    }
-    throw AuthException(_extractError(decoded), statusCode: res.statusCode);
+    final decoded = await _postJson('/ekyc/submit', {
+      'sessionId': sessionId,
+      'livenessToken': livenessToken,
+      'dob': dob,
+      'address': address,
+      if (home != null && home.isNotEmpty) 'home': home,
+    });
+    return EkycStatus.fromJson(decoded);
   }
 
   Future<EkycStatus> getMyStatus() async {
@@ -105,23 +122,45 @@ class EkycService {
     throw AuthException(_extractError(decoded), statusCode: res.statusCode);
   }
 
-  // ---------- helpers ----------
+  Future<Map<String, dynamic>> _postJson(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}$path');
+    final res = await http
+        .post(
+          uri,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ${_requireToken()}',
+          },
+          body: jsonEncode(body),
+        )
+        .timeout(ApiConfig.timeout);
+    final decoded = res.body.isNotEmpty
+        ? jsonDecode(res.body) as Map<String, dynamic>
+        : <String, dynamic>{};
+    if (res.statusCode >= 200 && res.statusCode < 300) return decoded;
+    throw AuthException(_extractError(decoded), statusCode: res.statusCode);
+  }
 
-  Future<Map<String, dynamic>> _uploadSingle(
+  Future<Map<String, dynamic>> _uploadWithFields(
     String path,
     String fieldName,
-    File file,
-  ) async {
+    File file, {
+    Map<String, String> fields = const {},
+  }) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}$path');
     final req = http.MultipartRequest('POST', uri)
       ..headers['Authorization'] = 'Bearer ${_requireToken()}'
+      ..fields.addAll(fields)
       ..files.add(await _multipart(fieldName, file));
     return _send(req);
   }
 
   Future<Map<String, dynamic>> _send(http.MultipartRequest req) async {
     try {
-      final streamed = await req.send().timeout(const Duration(seconds: 45));
+      final streamed = await req.send().timeout(const Duration(seconds: 60));
       final res = await http.Response.fromStream(streamed);
       final decoded = res.body.isNotEmpty
           ? jsonDecode(res.body) as Map<String, dynamic>
@@ -153,8 +192,25 @@ class EkycService {
 
   String _extractError(Map<String, dynamic> body) {
     final raw = body['message'];
-    if (raw is String) return raw;
-    if (raw is List && raw.isNotEmpty) return raw.join('\n');
+    if (raw is String) return _viValidation(raw);
+    if (raw is List && raw.isNotEmpty) {
+      return raw.map((e) => _viValidation(e.toString())).join('\n');
+    }
     return body['error'] as String? ?? 'Lỗi không xác định';
+  }
+
+  String _viValidation(String msg) {
+    final lower = msg.toLowerCase();
+    if (lower.contains('dob') && lower.contains('empty')) {
+      return 'Thiếu ngày sinh — quay lại bước mặt trước CCCD và nhập ngày sinh.';
+    }
+    if (lower.contains('address') &&
+        (lower.contains('empty') || lower.contains('longer'))) {
+      return 'Thiếu địa chỉ thường trú — quay lại bước mặt trước CCCD và nhập địa chỉ.';
+    }
+    if (lower.contains('session')) {
+      return msg;
+    }
+    return msg;
   }
 }

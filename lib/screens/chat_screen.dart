@@ -425,10 +425,21 @@ class _ProductStrip extends StatelessWidget {
               ),
               child: const Text('Đặt mua'),
             )
+          else if (thread.productTakenByOther)
+            Chip(
+              label: Text(
+                thread.purchaseBlockedLabel,
+                style: const TextStyle(fontSize: 11),
+              ),
+              backgroundColor: const Color(0xFFFEE2E2),
+            )
           else if (thread.amSeller)
-            const Text(
-              'Chờ khách đặt mua',
-              style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+            Text(
+              thread.productStatus == 'Reserved' ||
+                      thread.productStatus == 'Sold'
+                  ? thread.purchaseBlockedLabel
+                  : 'Chờ khách đặt mua',
+              style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
             ),
         ],
       ),

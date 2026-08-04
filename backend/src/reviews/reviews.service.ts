@@ -112,17 +112,21 @@ export class ReviewsService {
   private async applyReviewReward(revieweeId: number, rating: number) {
     if (rating !== 5) return;
 
-    const score = await this.scoreRepo.findOne({ where: { userId: revieweeId } });
-    if (!score) return;
+    let score = await this.scoreRepo.findOne({ where: { userId: revieweeId } });
+    if (!score) {
+      score = await this.scoreRepo.save(
+        this.scoreRepo.create({
+          userId: revieweeId,
+          currentPoint: 500,
+          rankLevel: 'Bronze',
+        }),
+      );
+    }
 
-    const delta = 30;
-    const next = Math.min(1000, score.currentPoint + delta);
-    score.currentPoint = next;
-    score.rankLevel = this.rankFor(next);
-    await this.scoreRepo.save(score);
+    // Chỉ ghi log — trigger SQL cộng điểm (tránh cộng 2 lần).
     await this.pointLogRepo.save({
       userId: revieweeId,
-      delta,
+      delta: 30,
       reasonCode: 'REVIEW_5_STAR',
       note: 'Nhận đánh giá 5 sao',
     });

@@ -74,7 +74,7 @@ CREATE TABLE [Identity].[Users] (
     CONSTRAINT UQ_Users_Email        UNIQUE ([email]),
     CONSTRAINT UQ_Users_Phone        UNIQUE ([phone_number]),
     CONSTRAINT CK_Users_KycStatus    CHECK ([kyc_status] IN ('Unverified','Pending','Verified','Rejected')),
-    CONSTRAINT CK_Users_AccountStatus CHECK ([account_status] IN ('Active','Locked','Banned'))
+    CONSTRAINT CK_Users_AccountStatus CHECK ([account_status] IN ('Active','Locked','Banned','Deleted'))
 );
 GO
 

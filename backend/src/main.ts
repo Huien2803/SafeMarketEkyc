@@ -125,9 +125,14 @@ async function bootstrap() {
   }
 
   const port = parseInt(config.get<string>('PORT', '3000'), 10);
-  await app.listen(port);
+  // 0.0.0.0: cho phép điện thoại cùng WiFi gọi API (không chỉ localhost)
+  await app.listen(port, '0.0.0.0');
 
   Logger.log(`SafeMarket API ready at http://localhost:${port}/api`, 'Bootstrap');
+  Logger.log(
+    `LAN (điện thoại): http://<IP-máy-tính>:${port}/api — ipconfig → IPv4`,
+    'Bootstrap',
+  );
   if (enableSwagger) {
     Logger.log(`Swagger UI:        http://localhost:${port}/api/docs`, 'Bootstrap');
   }

@@ -281,6 +281,15 @@ export class AdminService {
 
     user.kycStatus = 'Verified';
     await this.userRepo.save(user);
+
+    // Thưởng điểm tín nhiệm khi eKYC được duyệt (một lần / user).
+    await this.reputationService.adjustPoints(
+      userId,
+      50,
+      'EKYC_VERIFIED',
+      `Xác thực eKYC thành công [EKYC-${userId}]`,
+      { idempotentKey: `EKYC-${userId}` },
+    );
   }
 
   async rejectEkyc(userId: number, reason: string) {
@@ -383,25 +392,28 @@ export class AdminService {
       throw new BadRequestException('Số điểm trừ phải từ 1 đến 500');
     }
 
+    // Chỉ ghi Point_Logs — trigger trg_UpdateScoreAndRank sẽ trừ đúng 1 lần.
+    // (Trước đây vừa save Scores vừa insert log → bị trừ gấp đôi.)
     let score = await this.scoreRepo.findOne({ where: { userId } });
     if (!score) {
-      score = this.scoreRepo.create({
-        userId,
-        currentPoint: 500,
-        rankLevel: 'Bronze',
-      });
+      score = await this.scoreRepo.save(
+        this.scoreRepo.create({
+          userId,
+          currentPoint: 500,
+          rankLevel: 'Bronze',
+        }),
+      );
     }
 
-    const next = Math.max(0, score.currentPoint - points);
-    score.currentPoint = next;
-    score.rankLevel = this.rankFor(next);
-    await this.scoreRepo.save(score);
     await this.pointLogRepo.save({
       userId,
       delta: -points,
       reasonCode: 'ADMIN_PENALTY',
       note: reason,
     });
+
+    score = (await this.scoreRepo.findOne({ where: { userId } })) ?? score;
+    const next = score.currentPoint;
 
     await this.notify(userId, {
       title: 'Bị trừ điểm tín nhiệm',
@@ -424,57 +436,113 @@ export class AdminService {
   }
 
   /**
-   * Xóa tài khoản.
-   *  - Chưa phát sinh dữ liệu (không sản phẩm/đơn) -> xóa cứng hoàn toàn.
-   *  - Đã có sản phẩm/đơn -> xóa mềm: ẩn danh thông tin, ẩn toàn bộ sản phẩm,
-   *    giữ lại lịch sử giao dịch cho mục đích đối soát/pháp lý.
+   * Xóa tài khoản (soft-delete an toàn).
+   * DB gốc chỉ cho Active/Locked/Banned — phải mở constraint cho 'Deleted' trước khi lưu.
+   * Không xóa cứng vì nhiều FK (Point_Logs, Orders, Reports...) sẽ gây 500.
    */
   async deleteUser(userId: number) {
     const user = await this.requireNonAdminUser(userId);
+    if (user.accountStatus === 'Deleted') {
+      return { mode: 'soft' as const, userId: Number(userId), alreadyDeleted: true };
+    }
+
+    await this.ensureAccountStatusAllowsDeleted();
 
     const productCount = await this.productRepo.count({
       where: { sellerId: userId },
     });
-    const orderCount = await this.orderRepo.count({
-      where: { buyerId: userId },
-    });
 
-    if (productCount === 0 && orderCount === 0) {
-      await this.ekycRepo.delete({ userId });
-      await this.scoreRepo.delete({ userId });
-      await this.pointLogRepo.delete({ userId });
-      await this.userRepo.delete({ userId });
-      return { mode: 'hard' as const, userId: Number(userId) };
+    if (productCount > 0) {
+      await this.productRepo
+        .createQueryBuilder()
+        .update(Product)
+        .set({ status: 'Hidden' })
+        .where('seller_id = :userId', { userId })
+        .execute();
     }
 
-    // Xóa mềm: ẩn danh + vô hiệu hóa đăng nhập, giữ lịch sử.
-    await this.productRepo
-      .createQueryBuilder()
-      .update(Product)
-      .set({ status: 'Hidden' })
-      .where('seller_id = :userId', { userId })
-      .execute();
+    // Thu hồi phiên đăng nhập (bảng có thể chưa tồn tại trên DB cũ).
+    await this.safeExec(
+      `DELETE FROM [Identity].[RefreshTokens] WHERE [user_id] = @0`,
+      [userId],
+    );
 
     const anonId = `deleted_${userId}`;
+    const phone = `d${userId}`.slice(0, 15);
+
     user.accountStatus = 'Deleted';
     user.displayName = 'Tài khoản đã xóa';
     user.avatarUrl = null;
     user.location = null;
     user.email = `${anonId}@deleted.local`;
-    user.phoneNumber = `deleted-${userId}`.slice(0, 15);
+    user.phoneNumber = phone;
     user.passwordHash = 'ACCOUNT_DELETED';
     user.lockReason = 'Tài khoản đã bị quản trị viên xóa';
     user.lockedAt = new Date();
     user.lockedUntil = null;
     user.kycStatus = 'Unverified';
-    await this.userRepo.save(user);
-    await this.ekycRepo.delete({ userId });
+
+    try {
+      await this.userRepo.save(user);
+    } catch (err) {
+      // Fallback nếu constraint vẫn chưa nhận 'Deleted'
+      user.accountStatus = 'Banned';
+      user.lockReason =
+        '[DELETED] Tài khoản đã bị quản trị viên xóa (không thể đăng nhập)';
+      await this.userRepo.save(user);
+    }
+
+    try {
+      await this.ekycRepo.delete({ userId });
+    } catch {
+      // Không chặn xóa tài khoản nếu eKYC lỗi
+    }
 
     return {
       mode: 'soft' as const,
       userId: Number(userId),
       hiddenProducts: productCount,
     };
+  }
+
+  /** Mở CHECK account_status để cho phép giá trị Deleted (một lần / process). */
+  private accountStatusPatched = false;
+  private async ensureAccountStatusAllowsDeleted(): Promise<void> {
+    if (this.accountStatusPatched) return;
+    try {
+      await this.userRepo.query(`
+        IF EXISTS (
+          SELECT 1 FROM sys.check_constraints
+          WHERE name = N'CK_Users_AccountStatus'
+            AND parent_object_id = OBJECT_ID(N'[Identity].[Users]')
+        )
+        BEGIN
+          ALTER TABLE [Identity].[Users] DROP CONSTRAINT CK_Users_AccountStatus;
+        END
+      `);
+      await this.userRepo.query(`
+        IF NOT EXISTS (
+          SELECT 1 FROM sys.check_constraints
+          WHERE name = N'CK_Users_AccountStatus'
+            AND parent_object_id = OBJECT_ID(N'[Identity].[Users]')
+        )
+        BEGIN
+          ALTER TABLE [Identity].[Users] WITH NOCHECK ADD CONSTRAINT CK_Users_AccountStatus
+            CHECK ([account_status] IN ('Active','Locked','Banned','Deleted'));
+        END
+      `);
+    } catch {
+      // DB có thể đã patch hoặc không đủ quyền — soft delete sẽ fallback Banned
+    }
+    this.accountStatusPatched = true;
+  }
+
+  private async safeExec(sql: string, params: unknown[] = []): Promise<void> {
+    try {
+      await this.userRepo.query(sql, params);
+    } catch {
+      // bảng/cột có thể chưa có trên môi trường demo
+    }
   }
 
   async unlockUser(userId: number) {

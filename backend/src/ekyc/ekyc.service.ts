@@ -8,67 +8,60 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { EkycProfile } from '../entities/ekyc-profile.entity';
 import { User } from '../entities/user.entity';
-import { FptAiService } from './fpt-ai.service';
 import { SubmitEkycDto } from './dto/submit-ekyc.dto';
 import { EkycStatusDto } from './dto/ekyc-status.dto';
+import { EkycSessionService } from './ekyc-session.service';
 
 /**
- * Logic eKYC: lưu hồ sơ vào DB, đổi trạng thái user thành Pending/Verified.
- * Trigger SQL [Identity].[trg_SyncKycStatusOnVerify] sẽ tự động set
- * Users.kyc_status = 'Verified' khi verified_at được set.
+ * Lưu hồ sơ eKYC từ phiên server đã đủ bước (OCR + Face ID + face match).
+ * Admin duyệt qua /admin/ekyc/:id/approve → Verified.
  */
 @Injectable()
 export class EkycService {
   private readonly logger = new Logger(EkycService.name);
-
-  /** Ngưỡng similarity face match. >= 0.72 => coi như verified (luồng cũ). */
-  private readonly FACE_MATCH_THRESHOLD = 0.72;
-
-  /**
-   * Số điểm nhận dạng khuôn mặt tối thiểu cần lấy được ở bước liveness.
-   * Một khuôn mặt frontal thường cho >= 5 landmark (2 mắt, mũi, 2 góc miệng...).
-   */
-  private readonly MIN_RECOGNITION_POINTS = 4;
 
   constructor(
     @InjectRepository(EkycProfile)
     private readonly ekycRepo: Repository<EkycProfile>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
-    readonly fptAi: FptAiService,
+    private readonly sessions: EkycSessionService,
   ) {}
 
-  /**
-   * Sau khi Flutter chạy xong scan-id + face-match, nó gọi /ekyc/submit
-   * với toàn bộ thông tin đã trích xuất. Backend sẽ:
-   *   1. Validate similarity >= ngưỡng
-   *   2. Upsert vào [Identity].[eKYC_Profiles]
-   *   3. Set trạng thái Pending — admin duyệt qua /admin/ekyc/:id/approve
-   */
   async submit(userId: number, dto: SubmitEkycDto): Promise<EkycStatusDto> {
-    // Luồng mới: xác thực bằng ĐIỂM NHẬN DẠNG khuôn mặt lấy ở bước liveness,
-    // thay cho việc so khớp với ảnh trên CCCD (FPT.AI face-match).
-    const points = dto.recognitionPoints;
-    if (points != null) {
-      if (!dto.livenessToken) {
-        throw new BadRequestException(
-          'Thiếu xác minh khuôn mặt thật (liveness). Vui lòng quét lại khuôn mặt.',
-        );
-      }
-      if (points < this.MIN_RECOGNITION_POINTS) {
-        throw new BadRequestException(
-          `Chưa lấy đủ điểm nhận dạng khuôn mặt (${points} < ${this.MIN_RECOGNITION_POINTS}). ` +
-            'Vui lòng quét lại khuôn mặt rõ hơn.',
-        );
-      }
-    } else if (
-      dto.faceSimilarity == null ||
-      dto.faceSimilarity < this.FACE_MATCH_THRESHOLD
-    ) {
-      // Tương thích ngược: nếu không gửi recognitionPoints thì vẫn dùng similarity.
+    if (!dto.sessionId?.trim() || !dto.livenessToken?.trim()) {
       throw new BadRequestException(
-        'Chưa lấy được điểm nhận dạng khuôn mặt. Vui lòng quét lại khuôn mặt.',
+        'Thiếu sessionId hoặc livenessToken. Vui lòng hoàn tất đủ các bước xác thực.',
       );
+    }
+
+    const locked = this.sessions.assertReadyToSubmit(
+      userId,
+      dto.sessionId.trim(),
+      dto.livenessToken.trim(),
+      {
+        dob: dto.dob,
+        address: dto.address,
+        home: dto.home,
+      },
+    );
+
+    // Chống trùng CCCD với user khác đã Verified/Pending
+    const existing = await this.ekycRepo.findOne({
+      where: { idNumber: locked.idNumber },
+    });
+    if (existing && Number(existing.userId) !== userId) {
+      const other = await this.userRepo.findOne({
+        where: { userId: Number(existing.userId) },
+      });
+      if (
+        other &&
+        (other.kycStatus === 'Pending' || other.kycStatus === 'Verified')
+      ) {
+        throw new BadRequestException(
+          'Số CCCD này đã được dùng cho tài khoản khác. Liên hệ hỗ trợ nếu đây là nhầm lẫn.',
+        );
+      }
     }
 
     const user = await this.userRepo.findOne({ where: { userId } });
@@ -76,54 +69,51 @@ export class EkycService {
 
     let profile = await this.ekycRepo.findOne({ where: { userId } });
     const now = new Date();
-    const dobDate = this.parseDob(dto.dob);
+    const dobDate = this.parseDob(locked.dob);
 
     if (!profile) {
       profile = this.ekycRepo.create({
         userId,
-        idNumber: dto.idNumber,
-        fullName: dto.fullName,
+        idNumber: locked.idNumber,
+        fullName: locked.fullName,
         dob: dobDate,
-        address: dto.address,
-        idFrontUrl: dto.idFrontUrl ?? null,
-        idBackUrl: dto.idBackUrl ?? null,
-        faceVideoUrl: dto.selfieUrl ?? null,
+        address: locked.address,
+        idFrontUrl: locked.idFrontUrl,
+        idBackUrl: locked.idBackUrl,
+        faceVideoUrl: locked.selfieUrl,
         submittedAt: now,
         verifiedAt: null,
         rejectionReason: null,
       });
     } else {
-      profile.idNumber = dto.idNumber;
-      profile.fullName = dto.fullName;
+      profile.idNumber = locked.idNumber;
+      profile.fullName = locked.fullName;
       profile.dob = dobDate;
-      profile.address = dto.address;
-      profile.idFrontUrl = dto.idFrontUrl ?? profile.idFrontUrl;
-      profile.idBackUrl = dto.idBackUrl ?? profile.idBackUrl;
-      profile.faceVideoUrl = dto.selfieUrl ?? profile.faceVideoUrl;
+      profile.address = locked.address;
+      profile.idFrontUrl = locked.idFrontUrl;
+      profile.idBackUrl = locked.idBackUrl;
+      profile.faceVideoUrl = locked.selfieUrl;
       profile.submittedAt = now;
       profile.verifiedAt = null;
       profile.rejectionReason = null;
     }
 
     await this.ekycRepo.save(profile);
-
     user.kycStatus = 'Pending';
     await this.userRepo.save(user);
 
+    this.sessions.consume(dto.sessionId.trim());
+
     const refreshed = await this.userRepo.findOne({ where: { userId } });
-
     this.logger.log(
-      `eKYC user ${userId} submitted (Pending), recognitionPoints=${dto.recognitionPoints ?? '-'}, similarity=${dto.faceSimilarity ?? '-'}`,
+      `eKYC user ${userId} submitted Pending | points=${locked.recognitionPoints} similarity=${locked.faceSimilarity}`,
     );
-
     return this.toStatusDto(refreshed!, profile);
   }
 
-  /** Lấy trạng thái eKYC hiện tại của user đang đăng nhập */
   async getMyStatus(userId: number): Promise<EkycStatusDto> {
     const user = await this.userRepo.findOne({ where: { userId } });
     if (!user) throw new NotFoundException('Không tìm thấy user');
-
     const profile = await this.ekycRepo.findOne({ where: { userId } });
     return this.toStatusDto(user, profile);
   }
@@ -141,11 +131,14 @@ export class EkycService {
     };
   }
 
-  /** Cho phép cả 'dd/MM/yyyy' (FPT trả về) hoặc 'yyyy-MM-dd' */
   private parseDob(input: string): Date {
     if (/^\d{4}-\d{2}-\d{2}/.test(input)) return new Date(input);
     const m = input.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (m) return new Date(`${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`);
+    if (m) {
+      return new Date(
+        `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`,
+      );
+    }
     throw new BadRequestException(`Ngày sinh không hợp lệ: ${input}`);
   }
 

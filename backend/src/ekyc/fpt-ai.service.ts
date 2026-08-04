@@ -50,7 +50,7 @@ export class FptAiService {
   private readonly faceMatchUrl: string;
 
   constructor(private readonly config: ConfigService) {
-    this.apiKey = this.config.get<string>('FPT_AI_API_KEY', '');
+    this.apiKey = this.config.get<string>('FPT_AI_API_KEY', '').trim();
     this.ocrUrl = this.config.get<string>(
       'FPT_AI_OCR_URL',
       'https://api.fpt.ai/vision/idr/vnm',
@@ -60,11 +60,44 @@ export class FptAiService {
       'https://api.fpt.ai/dmp/checkface/v1/',
     );
 
-    if (!this.apiKey) {
+    if (!this.hasRealApiKey()) {
       this.logger.warn(
-        'FPT_AI_API_KEY trống - các endpoint eKYC sẽ trả về lỗi 500.',
+        'FPT_AI_API_KEY chưa cấu hình (đang trống hoặc còn giá trị mẫu YOUR_FPT_AI_API_KEY). ' +
+          'OCR CCCD sẽ thất bại — lấy key tại https://console.fpt.ai rồi điền vào backend/.env',
       );
     }
+  }
+
+  private hasRealApiKey(): boolean {
+    if (!this.apiKey) return false;
+    const lower = this.apiKey.toLowerCase();
+    return !(
+      lower.includes('your_fpt') ||
+      lower === 'changeme' ||
+      lower.includes('xxx') ||
+      lower === 'api_key_here'
+    );
+  }
+
+  private assertApiKeyConfigured(): void {
+    if (!this.hasRealApiKey()) {
+      throw new BadRequestException(
+        'Chưa cấu hình FPT.AI API key — không quét được ảnh CCCD. ' +
+          'Mở backend/.env, điền FPT_AI_API_KEY (lấy tại https://console.fpt.ai), rồi khởi động lại server.',
+      );
+    }
+  }
+
+  /** Map mã lỗi FPT OCR sang tiếng Việt dễ hiểu khi demo. */
+  private ocrErrorMessage(code: number, fallback?: string): string {
+    const map: Record<number, string> = {
+      1: 'Request OCR không hợp lệ (thiếu ảnh hoặc sai tham số).',
+      2: 'Ảnh thiếu góc CCCD — hãy chụp đủ 4 góc, nằm ngang, không bị cắt.',
+      3: 'Không nhận diện được CCCD trong ảnh — chụp rõ hơn, đủ sáng, tránh lóa/mờ.',
+      7: 'File không phải ảnh hợp lệ.',
+      8: 'Ảnh bị lỗi hoặc định dạng không hỗ trợ — thử chụp lại (JPEG).',
+    };
+    return map[code] ?? fallback ?? 'không nhận diện được ảnh';
   }
 
   /**
@@ -96,15 +129,39 @@ export class FptAiService {
     return {
       idNumber,
       fullName,
-      dob: String(data.dob ?? ''),
-      sex: String(data.sex ?? ''),
-      nationality: String(data.nationality ?? ''),
-      home: String(data.home ?? ''),
-      address: String(data.address ?? ''),
-      doe: String(data.doe ?? ''),
+      dob: this.cleanOcrField(data.dob),
+      sex: this.cleanOcrField(data.sex),
+      nationality: this.cleanOcrField(data.nationality),
+      home: this.cleanOcrField(
+        data.home ??
+          data.hometown ??
+          data.poe ??
+          data.origin_location ??
+          data.que_quan,
+      ),
+      address: this.cleanOcrField(
+        data.address ??
+          data.residence ??
+          data.permanent_address ??
+          data.recent_location ??
+          data.resident ??
+          data.noi_thuong_tru,
+      ),
+      doe: this.cleanOcrField(data.doe ?? data.expiry),
       type: String(data.type ?? ''),
       rawResponse: data,
     };
+  }
+
+  /** FPT hay trả "N/A" / "null" khi không chắc — coi như trống. */
+  private cleanOcrField(value: unknown): string {
+    const s = String(value ?? '').trim();
+    if (!s) return '';
+    const lower = s.toLowerCase();
+    if (lower === 'n/a' || lower === 'na' || lower === 'null' || lower === '-') {
+      return '';
+    }
+    return s;
   }
 
   /**
@@ -156,6 +213,7 @@ export class FptAiService {
     idCardImage: Express.Multer.File,
     selfieImage: Express.Multer.File,
   ): Promise<FaceMatchResult> {
+    this.assertApiKeyConfigured();
     const form = new FormData();
     form.append('file[]', idCardImage.buffer, { filename: 'id.jpg' });
     form.append('file[]', selfieImage.buffer, { filename: 'selfie.jpg' });
@@ -205,13 +263,18 @@ export class FptAiService {
   private async callOcr(
     file: Express.Multer.File,
   ): Promise<Record<string, any>> {
-    if (!file || !file.buffer) {
-      throw new BadRequestException('Thiếu ảnh CCCD/CMND');
+    this.assertApiKeyConfigured();
+
+    if (!file || !file.buffer || file.buffer.length === 0) {
+      throw new BadRequestException(
+        'Thiếu ảnh CCCD/CMND — hãy chụp hoặc chọn lại ảnh rồi nhấn Quét bằng FPT.AI.',
+      );
     }
 
     const form = new FormData();
+    const filename = this.normalizeUploadName(file);
     form.append('image', file.buffer, {
-      filename: file.originalname || 'idcard.jpg',
+      filename,
       contentType: file.mimetype || 'image/jpeg',
     });
 
@@ -226,13 +289,13 @@ export class FptAiService {
           'api-key': this.apiKey,
         },
         maxBodyLength: Infinity,
-        timeout: 30_000,
+        timeout: 45_000,
       });
 
       const body = res.data;
       if (body.errorCode !== 0 || !body.data || body.data.length === 0) {
         throw new BadRequestException(
-          `FPT.AI OCR lỗi: ${body.errorMessage ?? 'không nhận diện được ảnh'}`,
+          `FPT.AI OCR lỗi: ${this.ocrErrorMessage(body.errorCode, body.errorMessage)}`,
         );
       }
 
@@ -240,6 +303,17 @@ export class FptAiService {
     } catch (err) {
       this.handleAxiosError(err, 'OCR');
     }
+  }
+
+  private normalizeUploadName(file: Express.Multer.File): string {
+    const raw = (file.originalname || 'idcard.jpg').toLowerCase();
+    if (raw.endsWith('.png')) return 'idcard.png';
+    if (raw.endsWith('.webp')) return 'idcard.webp';
+    if (raw.endsWith('.heic') || raw.endsWith('.heif')) {
+      // FPT thường không đọc HEIC tốt — vẫn gửi nhưng đặt tên .jpg sau khi client ép JPEG.
+      return 'idcard.jpg';
+    }
+    return 'idcard.jpg';
   }
 
   private handleAxiosError(err: unknown, label: string): never {

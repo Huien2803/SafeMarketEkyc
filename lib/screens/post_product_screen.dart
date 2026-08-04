@@ -25,8 +25,9 @@ class _PostProductScreenState extends State<PostProductScreen> {
   final _locationCtrl = TextEditingController();
   final _picker = ImagePicker();
 
-  XFile? _image;
-  Uint8List? _imagePreview;
+  static const int _maxImages = 8;
+  final List<XFile> _images = [];
+  final List<Uint8List> _previews = [];
   List<ProductCategory> _categories = [];
   int? _categoryId;
   double _condition = 85;
@@ -64,21 +65,59 @@ class _PostProductScreenState extends State<PostProductScreen> {
     }
   }
 
-  Future<void> _pickImage(ImageSource source) async {
+  int get _remainingSlots => _maxImages - _images.length;
+
+  Future<void> _addFiles(List<XFile> files) async {
+    if (files.isEmpty) return;
+    final toAdd = files.take(_remainingSlots).toList();
+    final previews = <Uint8List>[];
+    for (final f in toAdd) {
+      previews.add(await f.readAsBytes());
+    }
+    if (!mounted) return;
+    setState(() {
+      _images.addAll(toAdd);
+      _previews.addAll(previews);
+    });
+    if (files.length > toAdd.length && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Chỉ được tối đa $_maxImages ảnh')),
+      );
+    }
+  }
+
+  Future<void> _pickFromCamera() async {
     final file = await _picker.pickImage(
-      source: source,
+      source: ImageSource.camera,
       imageQuality: 85,
       maxWidth: 1600,
     );
-    if (file == null || !mounted) return;
-    final bytes = await file.readAsBytes();
+    if (file == null) return;
+    await _addFiles([file]);
+  }
+
+  Future<void> _pickFromGallery() async {
+    final files = await _picker.pickMultiImage(
+      imageQuality: 85,
+      maxWidth: 1600,
+    );
+    await _addFiles(files);
+  }
+
+  void _removeImage(int index) {
     setState(() {
-      _image = file;
-      _imagePreview = bytes;
+      _images.removeAt(index);
+      _previews.removeAt(index);
     });
   }
 
   void _showImageSourceSheet() {
+    if (_remainingSlots <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Đã đạt tối đa $_maxImages ảnh')),
+      );
+      return;
+    }
     showModalBottomSheet<void>(
       context: context,
       builder: (ctx) => SafeArea(
@@ -89,15 +128,15 @@ class _PostProductScreenState extends State<PostProductScreen> {
               title: const Text('Chụp ảnh'),
               onTap: () {
                 Navigator.pop(ctx);
-                _pickImage(ImageSource.camera);
+                _pickFromCamera();
               },
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Chọn từ thư viện'),
+              title: const Text('Chọn từ thư viện (nhiều ảnh)'),
               onTap: () {
                 Navigator.pop(ctx);
-                _pickImage(ImageSource.gallery);
+                _pickFromGallery();
               },
             ),
           ],
@@ -107,10 +146,10 @@ class _PostProductScreenState extends State<PostProductScreen> {
   }
 
   Future<void> _submit() async {
-    if (_image == null) {
+    if (_images.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Vui lòng thêm ảnh sản phẩm (bắt buộc)'),
+          content: Text('Vui lòng thêm ít nhất 1 ảnh sản phẩm (bắt buộc)'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -134,7 +173,7 @@ class _PostProductScreenState extends State<PostProductScreen> {
     setState(() => _loading = true);
     try {
       await ProductService.instance.createProduct(
-        image: _image!,
+        images: _images,
         title: _titleCtrl.text.trim(),
         description: _descCtrl.text.trim(),
         price: int.parse(_priceCtrl.text.replaceAll('.', '').replaceAll(',', '')),
@@ -161,6 +200,109 @@ class _PostProductScreenState extends State<PostProductScreen> {
     }
   }
 
+  Widget _buildImagePicker() {
+    return SizedBox(
+      height: 110,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _images.length + (_remainingSlots > 0 ? 1 : 0),
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, index) {
+          if (index >= _images.length) {
+            return _buildAddTile();
+          }
+          return _buildThumb(index);
+        },
+      ),
+    );
+  }
+
+  Widget _buildAddTile() {
+    return GestureDetector(
+      onTap: _showImageSourceSheet,
+      child: Container(
+        width: 110,
+        height: 110,
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.primary, width: 2),
+        ),
+        child: const Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.add_a_photo_outlined, size: 32, color: AppColors.primary),
+            SizedBox(height: 6),
+            Text(
+              'Thêm ảnh',
+              style: TextStyle(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildThumb(int index) {
+    return SizedBox(
+      width: 110,
+      height: 110,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Image.memory(
+              _previews[index],
+              width: 110,
+              height: 110,
+              fit: BoxFit.cover,
+            ),
+          ),
+          if (index == 0)
+            Positioned(
+              left: 6,
+              bottom: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  'Ảnh bìa',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          Positioned(
+            right: 2,
+            top: 2,
+            child: GestureDetector(
+              onTap: () => _removeImage(index),
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Colors.black54,
+                  shape: BoxShape.circle,
+                ),
+                padding: const EdgeInsets.all(3),
+                child: const Icon(Icons.close, size: 16, color: Colors.white),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -180,70 +322,33 @@ class _PostProductScreenState extends State<PostProductScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text(
-                      'Ảnh sản phẩm *',
-                      style: TextStyle(fontWeight: FontWeight.w700),
+                    Row(
+                      children: [
+                        const Text(
+                          'Ảnh sản phẩm *',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${_images.length}/$_maxImages',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 4),
                     const Text(
-                      'Người mua cần thấy hình dạng sản phẩm trước khi mua.',
+                      'Thêm nhiều ảnh (nhiều góc, chi tiết) để người mua thấy rõ. Ảnh đầu tiên là ảnh bìa.',
                       style: TextStyle(
                         fontSize: 12,
                         color: AppColors.textSecondary,
                       ),
                     ),
                     const SizedBox(height: 12),
-                    GestureDetector(
-                      onTap: _showImageSourceSheet,
-                      child: Container(
-                        height: 200,
-                        decoration: BoxDecoration(
-                          color: AppColors.white,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: _image == null
-                                ? AppColors.primary
-                                : AppColors.textMuted.withValues(alpha: 0.3),
-                            width: _image == null ? 2 : 1,
-                          ),
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        child: _imagePreview == null
-                            ? const Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.add_a_photo_outlined,
-                                      size: 48, color: AppColors.primary),
-                                  SizedBox(height: 8),
-                                  Text(
-                                    'Chạm để thêm ảnh (bắt buộc)',
-                                    style: TextStyle(
-                                      color: AppColors.primary,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              )
-                            : Stack(
-                                fit: StackFit.expand,
-                                children: [
-                                  Image.memory(
-                                    _imagePreview!,
-                                    fit: BoxFit.cover,
-                                  ),
-                                  Positioned(
-                                    right: 8,
-                                    bottom: 8,
-                                    child: FilledButton.icon(
-                                      onPressed: _showImageSourceSheet,
-                                      icon: const Icon(Icons.edit, size: 18),
-                                      label: const Text('Đổi ảnh'),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                      ),
-                    ),
+                    _buildImagePicker(),
                     const SizedBox(height: 20),
                     TextFormField(
                       controller: _titleCtrl,

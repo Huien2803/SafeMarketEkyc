@@ -365,9 +365,11 @@ class AdminService {
 
   Future<void> warnUser(int userId, {String reason = 'Vi phạm quy định'}) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/warn');
-    final res = await http
-        .post(uri, headers: _headers, body: jsonEncode({'reason': reason}))
-        .timeout(ApiConfig.timeout);
+    final res = await AuthService.instance.authorizedRequest(
+      (h) => http
+          .post(uri, headers: h, body: jsonEncode({'reason': reason}))
+          .timeout(ApiConfig.timeout),
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không gửi được cảnh cáo'));
     }
@@ -379,41 +381,39 @@ class AdminService {
     String reason = 'Vi phạm quy định',
   }) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/suspend');
-    final res = await http
-        .post(
-          uri,
-          headers: _headers,
-          body: jsonEncode({'days': days, 'reason': reason}),
-        )
-        .timeout(ApiConfig.timeout);
+    final res = await AuthService.instance.authorizedRequest(
+      (h) => http
+          .post(
+            uri,
+            headers: h,
+            body: jsonEncode({'days': days, 'reason': reason}),
+          )
+          .timeout(ApiConfig.timeout),
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không đình chỉ được tài khoản'));
     }
   }
 
   Future<void> lockUser(int userId, {String reason = 'Vi phạm'}) async {
-
     final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/lock');
-
-    final res = await http
-
-        .post(uri, headers: _headers, body: jsonEncode({'reason': reason}))
-
-        .timeout(ApiConfig.timeout);
-
+    final res = await AuthService.instance.authorizedRequest(
+      (h) => http
+          .post(uri, headers: h, body: jsonEncode({'reason': reason}))
+          .timeout(ApiConfig.timeout),
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
-
       throw Exception(_errorFromResponse(res, 'Không khóa được tài khoản'));
-
     }
-
   }
 
   Future<void> banUser(int userId, {String reason = 'Cấm vĩnh viễn'}) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/ban');
-    final res = await http
-        .post(uri, headers: _headers, body: jsonEncode({'reason': reason}))
-        .timeout(ApiConfig.timeout);
+    final res = await AuthService.instance.authorizedRequest(
+      (h) => http
+          .post(uri, headers: h, body: jsonEncode({'reason': reason}))
+          .timeout(ApiConfig.timeout),
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không cấm được tài khoản'));
     }
@@ -425,13 +425,15 @@ class AdminService {
     String reason = 'Vi phạm quy định',
   }) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/punish');
-    final res = await http
-        .post(
-          uri,
-          headers: _headers,
-          body: jsonEncode({'points': points, 'reason': reason}),
-        )
-        .timeout(ApiConfig.timeout);
+    final res = await AuthService.instance.authorizedRequest(
+      (h) => http
+          .post(
+            uri,
+            headers: h,
+            body: jsonEncode({'points': points, 'reason': reason}),
+          )
+          .timeout(ApiConfig.timeout),
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không trừ điểm được'));
     }
@@ -441,7 +443,9 @@ class AdminService {
   /// xóa mềm (ẩn danh + ẩn sản phẩm, giữ lịch sử giao dịch).
   Future<String> deleteUser(int userId) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/delete');
-    final res = await http.post(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await AuthService.instance.authorizedRequest(
+      (h) => http.post(uri, headers: h).timeout(ApiConfig.timeout),
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không xóa được tài khoản'));
     }
@@ -452,20 +456,14 @@ class AdminService {
     return 'hard';
   }
 
-
-
   Future<void> unlockUser(int userId) async {
-
     final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/unlock');
-
-    final res = await http.post(uri, headers: _headers).timeout(ApiConfig.timeout);
-
+    final res = await AuthService.instance.authorizedRequest(
+      (h) => http.post(uri, headers: h).timeout(ApiConfig.timeout),
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
-
-      throw Exception('Không mở khóa được tài khoản');
-
+      throw Exception(_errorFromResponse(res, 'Không mở khóa được tài khoản'));
     }
-
   }
 
 

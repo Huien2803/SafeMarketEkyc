@@ -180,8 +180,8 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
               const SizedBox(height: 8),
               Text(
                 widget.devOtp != null
-                    ? 'Chế độ dev — mã OTP: ${widget.devOtp}\n(Gửi tới ${widget.email} khi đã cấu hình SMTP)'
-                    : 'Chúng tôi đã gửi mã 6 chữ số tới\n${widget.email}',
+                    ? 'Chế độ fallback — mã OTP: ${widget.devOtp}'
+                    : 'Đã gửi mã 6 chữ số tới\n${widget.email}\n(Kiểm tra cả hộp thư Spam)',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 14,

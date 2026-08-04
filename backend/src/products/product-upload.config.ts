@@ -6,6 +6,9 @@ import { BadRequestException } from '@nestjs/common';
 /** Thư mục lưu ảnh sản phẩm upload từ Flutter (file thật, không dùng URL ngoài) */
 export const PRODUCT_UPLOAD_DIR = join(process.cwd(), 'uploads', 'products');
 
+/** Số ảnh tối đa cho mỗi sản phẩm */
+export const MAX_PRODUCT_IMAGES = 8;
+
 export function ensureProductUploadDir(): void {
   if (!existsSync(PRODUCT_UPLOAD_DIR)) {
     mkdirSync(PRODUCT_UPLOAD_DIR, { recursive: true });

@@ -116,6 +116,18 @@ class ChatThreadDetail {
       orderId == null &&
       (productStatus == null || productStatus == 'Available');
 
+  /// Người khác đã đặt (Reserved/Sold) hoặc mình không phải buyer.
+  bool get productTakenByOther =>
+      amBuyer &&
+      orderId == null &&
+      (productStatus == 'Reserved' || productStatus == 'Sold');
+
+  String get purchaseBlockedLabel {
+    if (productStatus == 'Sold') return 'Đã bán';
+    if (productStatus == 'Reserved') return 'Đã có người đặt';
+    return 'Không thể đặt mua';
+  }
+
   factory ChatThreadDetail.fromJson(Map<String, dynamic> json) {
     return ChatThreadDetail(
       threadId: json['threadId']?.toString() ?? '',

@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { Order } from '../entities/order.entity';
 import { Payment } from '../entities/payment.entity';
 import { Product } from '../entities/product.entity';
@@ -39,12 +39,17 @@ export class OrdersService {
     @InjectRepository(Product) private readonly productRepo: Repository<Product>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(Review) private readonly reviewRepo: Repository<Review>,
+    private readonly dataSource: DataSource,
     private readonly notificationsService: NotificationsService,
     private readonly paymentsService: PaymentsService,
     private readonly walletService: WalletService,
     private readonly reputationService: ReputationService,
   ) {}
 
+  /**
+   * Tạo đơn: mỗi sản phẩm chỉ 1 đơn đang hiệu lực.
+   * Khóa dòng sản phẩm trong transaction để tránh 2 người đặt cùng lúc.
+   */
   async createOrder(buyerId: number, dto: CreateOrderDto): Promise<Record<string, unknown>> {
     const buyer = await this.userRepo.findOne({ where: { userId: buyerId } });
     if (!buyer || buyer.kycStatus !== 'Verified') {
@@ -53,79 +58,114 @@ export class OrdersService {
       );
     }
 
-    const product = await this.productRepo.findOne({
-      where: { productId: dto.productId },
-      relations: ['seller'],
-    });
-    if (!product) throw new NotFoundException('Sản phẩm không tồn tại');
-    if (product.status !== 'Available') {
-      throw new BadRequestException('Sản phẩm không còn khả dụng');
-    }
-    if (Number(product.sellerId) === buyerId) {
-      throw new BadRequestException('Bạn không thể mua sản phẩm của chính mình');
-    }
-
-    const existing = await this.orderRepo.findOne({
-      where: { productId: dto.productId },
-    });
-    if (existing && existing.orderStatus !== 'Cancelled') {
-      throw new ConflictException('Sản phẩm đã có đơn hàng');
-    }
-
     const paymentMethod = dto.paymentMethod ?? 'BANK_TRANSFER';
     const deliveryMethod = dto.deliveryMethod ?? 'SHIP';
 
-    let saved: Order;
-    if (existing?.orderStatus === 'Cancelled') {
-      // Một sản phẩm chỉ có 1 dòng Orders (UNIQUE product_id) — tái kích hoạt đơn đã hủy.
-      existing.buyerId = buyerId;
-      existing.shippingAddress = dto.shippingAddress;
-      existing.paymentMethod = paymentMethod;
-      existing.deliveryMethod = deliveryMethod;
-      existing.orderStatus = 'Pending';
-      existing.cancelReason = null;
-      existing.disputeType = null;
-      existing.disputeNote = null;
-      existing.completedAt = null;
-      saved = await this.orderRepo.save(existing);
-    } else {
-      const order = this.orderRepo.create({
-        buyerId,
-        productId: dto.productId,
-        shippingAddress: dto.shippingAddress,
-        paymentMethod,
-        deliveryMethod,
-        orderStatus: 'Pending',
+    const savedOrderId = await this.dataSource.transaction(async (manager) => {
+      const product = await manager.findOne(Product, {
+        where: { productId: dto.productId },
+        relations: ['seller'],
+        lock: { mode: 'pessimistic_write' },
       });
-      saved = await this.orderRepo.save(order);
-    }
-
-    product.status = 'Reserved';
-    await this.productRepo.save(product);
-
-    if (paymentMethod === 'BANK_TRANSFER') {
-      const payment = await this.paymentRepo.findOne({
-        where: { orderId: saved.orderId },
-      });
-      if (payment) {
-        payment.amount = product.price;
-        payment.paymentMethod = paymentMethod;
-        payment.escrowStatus = 'Holding';
-        payment.transactionRef = `ESC-${saved.orderId}-${Date.now()}`;
-        await this.paymentRepo.save(payment);
-      } else {
-        await this.paymentRepo.save({
-          orderId: saved.orderId,
-          amount: product.price,
-          paymentMethod,
-          escrowStatus: 'Holding',
-          transactionRef: `ESC-${saved.orderId}-${Date.now()}`,
-        });
+      if (!product) throw new NotFoundException('Sản phẩm không tồn tại');
+      if (Number(product.sellerId) === buyerId) {
+        throw new BadRequestException('Bạn không thể mua sản phẩm của chính mình');
       }
-    }
-    // ONLINE_ESCROW: thanh toán qua VNPay → tạo payment khi capture thành công
+      if (product.status === 'Sold') {
+        throw new BadRequestException('Sản phẩm đã được bán');
+      }
+      if (product.status === 'Hidden') {
+        throw new BadRequestException('Sản phẩm không còn khả dụng');
+      }
+      if (product.status === 'Reserved') {
+        throw new ConflictException(
+          'Sản phẩm đã có người đặt hàng. Bạn không thể đặt lại.',
+        );
+      }
+      if (product.status !== 'Available') {
+        throw new BadRequestException('Sản phẩm không còn khả dụng');
+      }
 
-    return this.toOrderJson(saved.orderId);
+      const existing = await manager.findOne(Order, {
+        where: { productId: dto.productId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (existing && existing.orderStatus !== 'Cancelled') {
+        // Đồng bộ trạng thái nếu order còn mà product vẫn Available (dữ liệu lệch).
+        if (product.status === 'Available') {
+          product.status = 'Reserved';
+          await manager.save(product);
+        }
+        throw new ConflictException(
+          'Sản phẩm đã có người đặt hàng. Bạn không thể đặt lại.',
+        );
+      }
+
+      let saved: Order;
+      if (existing?.orderStatus === 'Cancelled') {
+        // UNIQUE(product_id): tái dùng dòng đơn đã hủy khi sản phẩm Available lại.
+        existing.buyerId = buyerId;
+        existing.shippingAddress = dto.shippingAddress;
+        existing.paymentMethod = paymentMethod;
+        existing.deliveryMethod = deliveryMethod;
+        existing.orderStatus = 'Pending';
+        existing.cancelReason = null;
+        existing.disputeType = null;
+        existing.disputeNote = null;
+        existing.completedAt = null;
+        saved = await manager.save(existing);
+      } else {
+        saved = await manager.save(
+          manager.create(Order, {
+            buyerId,
+            productId: dto.productId,
+            shippingAddress: dto.shippingAddress,
+            paymentMethod,
+            deliveryMethod,
+            orderStatus: 'Pending',
+          }),
+        );
+      }
+
+      // Chỉ Reserved khi vẫn còn Available (chặn race với người khác).
+      const reserved = await manager.update(
+        Product,
+        { productId: dto.productId, status: 'Available' },
+        { status: 'Reserved' },
+      );
+      if (!reserved.affected) {
+        throw new ConflictException(
+          'Sản phẩm đã có người đặt hàng. Bạn không thể đặt lại.',
+        );
+      }
+
+      if (paymentMethod === 'BANK_TRANSFER') {
+        const payment = await manager.findOne(Payment, {
+          where: { orderId: saved.orderId },
+        });
+        if (payment) {
+          payment.amount = product.price;
+          payment.paymentMethod = paymentMethod;
+          payment.escrowStatus = 'Holding';
+          payment.transactionRef = `ESC-${saved.orderId}-${Date.now()}`;
+          await manager.save(payment);
+        } else {
+          await manager.save(
+            manager.create(Payment, {
+              orderId: saved.orderId,
+              amount: product.price,
+              paymentMethod,
+              escrowStatus: 'Holding',
+              transactionRef: `ESC-${saved.orderId}-${Date.now()}`,
+            }),
+          );
+        }
+      }
+
+      return saved.orderId;
+    });
+
+    return this.toOrderJson(savedOrderId);
   }
 
   async getOrder(orderId: number, userId: number): Promise<Record<string, unknown>> {
@@ -268,7 +308,8 @@ export class OrdersService {
   }
 
   async confirmHandover(orderId: number, userId: number) {
-    const order = await this.requireParticipant(orderId, userId);
+    // Chỉ người bán được xác nhận đã giao — tránh người mua tự nhảy bước.
+    const order = await this.requireSeller(orderId, userId);
     if (order.deliveryMethod !== 'DIRECT') {
       throw new BadRequestException('Chỉ áp dụng cho giao trực tiếp');
     }
@@ -278,35 +319,49 @@ export class OrdersService {
           'Chờ người mua thanh toán online trước khi xác nhận giao hàng',
         );
       }
+      order.orderStatus = 'Shipped';
+      await this.orderRepo.save(order);
       return this.toOrderJson(orderId);
     }
     if (order.orderStatus !== 'Pending') {
       throw new BadRequestException('Không thể xác nhận giao');
     }
-    order.orderStatus = 'Paid';
+    // Tiền mặt + gặp trực tiếp: người bán xác nhận đã giao & nhận tiền
+    // → Shipped (chờ người mua chụp ảnh xác nhận nhận hàng).
+    order.orderStatus = 'Shipped';
     await this.orderRepo.save(order);
     return this.toOrderJson(orderId);
   }
 
   async complete(orderId: number, userId: number, proofUrl?: string | null) {
     const order = await this.requireParticipant(orderId, userId);
-    if (!['Paid', 'Shipped'].includes(order.orderStatus)) {
-      throw new BadRequestException('Đơn chưa sẵn sàng hoàn tất');
-    }
-
     const isBuyer = Number(order.buyerId) === userId;
-    if (isBuyer && !proofUrl) {
+    if (!isBuyer) {
+      throw new ForbiddenException(
+        'Chỉ người mua được xác nhận đã nhận hàng',
+      );
+    }
+    if (!proofUrl) {
       throw new BadRequestException(
         'Vui lòng chụp ảnh xác nhận đã nhận hàng trước khi hoàn tất',
       );
     }
 
+    // Bắt buộc người bán đã xác nhận giao (Shipped).
+    // Paid + DIRECT: tương thích đơn cũ (trước đây handover đặt Paid).
+    const sellerDelivered =
+      order.orderStatus === 'Shipped' ||
+      (order.orderStatus === 'Paid' && order.deliveryMethod === 'DIRECT');
+    if (!sellerDelivered) {
+      throw new BadRequestException(
+        'Chờ người bán xác nhận đã giao hàng trước khi bạn xác nhận nhận hàng',
+      );
+    }
+
     order.orderStatus = 'Completed';
     order.completedAt = new Date();
-    if (proofUrl) {
-      order.receiptProofUrl = proofUrl;
-      order.receivedAt = new Date();
-    }
+    order.receiptProofUrl = proofUrl;
+    order.receivedAt = new Date();
     await this.orderRepo.save(order);
 
     const product = await this.productRepo.findOne({
@@ -321,23 +376,20 @@ export class OrdersService {
       );
 
       // Báo trực tiếp cho người bán: người mua đã xác nhận nhận hàng (kèm ảnh).
-      if (isBuyer) {
-        const buyer = await this.userRepo.findOne({
-          where: { userId: order.buyerId },
-        });
-        const buyerName =
-          buyer?.displayName ?? buyer?.email ?? 'Người mua';
-        await this.notificationsService.notifyOrderReceived(
-          Number(product.sellerId),
-          {
-            orderId: Number(order.orderId),
-            productId: Number(product.productId),
-            productTitle: product.title,
-            buyerName,
-            proofUrl: proofUrl ?? null,
-          },
-        );
-      }
+      const buyer = await this.userRepo.findOne({
+        where: { userId: order.buyerId },
+      });
+      const buyerName = buyer?.displayName ?? buyer?.email ?? 'Người mua';
+      await this.notificationsService.notifyOrderReceived(
+        Number(product.sellerId),
+        {
+          orderId: Number(order.orderId),
+          productId: Number(product.productId),
+          productTitle: product.title,
+          buyerName,
+          proofUrl: proofUrl ?? null,
+        },
+      );
     }
 
     const payment = await this.paymentRepo.findOne({ where: { orderId } });

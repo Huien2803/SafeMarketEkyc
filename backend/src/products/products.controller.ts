@@ -8,12 +8,12 @@ import {
   Post,
   Put,
   Query,
-  UploadedFile,
+  UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -28,6 +28,7 @@ import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { ProductQueryDto } from './dto/product-query.dto';
 import {
+  MAX_PRODUCT_IMAGES,
   productImageFilter,
   productImageStorage,
 } from './product-upload.config';
@@ -65,7 +66,7 @@ export class ProductsController {
   @ApiBody({
     schema: {
       type: 'object',
-      required: ['title', 'description', 'price', 'conditionPct', 'categoryId', 'image'],
+      required: ['title', 'description', 'price', 'conditionPct', 'categoryId', 'images'],
       properties: {
         title: { type: 'string' },
         description: { type: 'string' },
@@ -73,12 +74,16 @@ export class ProductsController {
         conditionPct: { type: 'integer' },
         categoryId: { type: 'integer' },
         location: { type: 'string' },
-        image: { type: 'string', format: 'binary' },
+        images: {
+          type: 'array',
+          items: { type: 'string', format: 'binary' },
+          description: `Tối đa ${MAX_PRODUCT_IMAGES} ảnh; ảnh đầu tiên là ảnh bìa`,
+        },
       },
     },
   })
   @UseInterceptors(
-    FileInterceptor('image', {
+    FilesInterceptor('images', MAX_PRODUCT_IMAGES, {
       storage: productImageStorage,
       fileFilter: productImageFilter,
       limits: { fileSize: 5 * 1024 * 1024 },
@@ -87,9 +92,9 @@ export class ProductsController {
   createProduct(
     @CurrentUser() user: User,
     @Body() dto: CreateProductDto,
-    @UploadedFile() image: Express.Multer.File,
+    @UploadedFiles() images: Express.Multer.File[],
   ) {
-    return this.productsService.createProduct(Number(user.userId), dto, image);
+    return this.productsService.createProduct(Number(user.userId), dto, images);
   }
 
   @Put(':id')

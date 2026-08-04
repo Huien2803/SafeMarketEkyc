@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsNotEmpty,
   IsNumber,
@@ -8,74 +8,88 @@ import {
   Max,
   Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 /**
- * Body khi user xác nhận thông tin eKYC đã chụp xong và muốn lưu vào hệ thống.
- * Frontend sẽ gọi /api/ekyc/submit sau khi đã chạy 2 bước scan-id + face-match.
+ * Submit eKYC — dữ liệu CCCD lấy từ session server (không tin client bịa số CCCD).
+ * Client chỉ gửi sessionId + livenessToken + bổ sung dob/address nếu OCR thiếu.
  */
 export class SubmitEkycDto {
-  @ApiProperty({ example: '079203001234' })
+  @ApiProperty({ example: 'a1b2c3...' })
   @IsString()
   @IsNotEmpty()
-  @Length(9, 20)
-  idNumber: string;
-
-  @ApiProperty({ example: 'NGUYỄN VĂN AN' })
-  @IsString()
-  @IsNotEmpty()
-  @Length(2, 100)
-  fullName: string;
-
-  @ApiProperty({ example: '1998-05-15', description: 'Ngày sinh ISO yyyy-MM-dd' })
-  @IsString()
-  @IsNotEmpty()
-  dob: string;
-
-  @ApiProperty({ example: '123 Lê Lợi, Quận 1, TP.HCM' })
-  @IsString()
-  @IsNotEmpty()
-  @Length(2, 255)
-  address: string;
+  sessionId: string;
 
   @ApiProperty({
-    required: false,
-    example: 0.92,
-    description: 'Điểm similarity từ face match (0..1) — luồng cũ, không bắt buộc',
+    example: 'ekyc.a1b2....',
+    description: 'Token do server phát sau bước Face ID',
   })
+  @IsString()
+  @IsNotEmpty()
+  livenessToken: string;
+
+  @ApiPropertyOptional({
+    example: '1998-05-15',
+    description: 'Bổ sung nếu OCR thiếu — dd/MM/yyyy hoặc yyyy-MM-dd',
+  })
+  @IsOptional()
+  @IsString()
+  dob?: string;
+
+  @ApiPropertyOptional({ example: '123 Lê Lợi, Quận 1, TP.HCM' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 255)
+  address?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @Length(0, 255)
+  home?: string;
+
+  /** Tương thích ngược — bị bỏ qua nếu có session hợp lệ */
+  @ApiPropertyOptional({ deprecated: true })
+  @IsOptional()
+  @IsString()
+  idNumber?: string;
+
+  @ApiPropertyOptional({ deprecated: true })
+  @IsOptional()
+  @IsString()
+  fullName?: string;
+
+  @ApiPropertyOptional({ deprecated: true })
   @IsOptional()
   @IsNumber()
   @Min(0)
   @Max(1)
   faceSimilarity?: number;
 
-  @ApiProperty({
-    required: false,
-    example: 12,
-    description:
-      'Số điểm nhận dạng khuôn mặt (facial landmarks) lấy được ở bước liveness',
-  })
+  @ApiPropertyOptional({ deprecated: true })
   @IsOptional()
   @IsNumber()
   @Min(0)
   recognitionPoints?: number;
+}
 
-  @ApiProperty({ required: false, example: '/uploads/kyc/1/front.jpg' })
-  @IsOptional()
-  @IsString()
-  idFrontUrl?: string;
+export class StartSessionResponseDto {
+  @ApiProperty()
+  sessionId: string;
 
-  @ApiProperty({ required: false, example: '/uploads/kyc/1/back.jpg' })
-  @IsOptional()
-  @IsString()
-  idBackUrl?: string;
+  @ApiProperty()
+  expiresAt: string;
+}
 
-  @ApiProperty({ required: false, example: '/uploads/kyc/1/selfie.jpg' })
-  @IsOptional()
+export class CompleteLivenessDto {
+  @ApiProperty()
   @IsString()
-  selfieUrl?: string;
+  @IsNotEmpty()
+  sessionId: string;
 
-  @ApiProperty({ required: false, description: 'Token từ bước liveness-check' })
-  @IsOptional()
-  @IsString()
-  livenessToken?: string;
+  @ApiProperty({ example: 25 })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  recognitionPoints: number;
 }

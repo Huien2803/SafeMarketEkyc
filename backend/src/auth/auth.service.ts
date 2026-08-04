@@ -8,7 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import { createHash, randomBytes } from 'crypto';
+import { createHash, randomBytes, randomInt } from 'crypto';
 import { IsNull, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User } from '../entities/user.entity';
@@ -300,7 +300,7 @@ export class AuthService {
   }
 
   private generateOtp(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    return randomInt(100000, 1000000).toString();
   }
 
   private cleanupExpired(): void {
