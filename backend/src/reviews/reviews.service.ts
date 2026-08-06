@@ -109,8 +109,19 @@ export class ReviewsService {
     };
   }
 
+  /**
+   * Ảnh hưởng điểm tín nhiệm khi nhận đánh giá:
+   * 5★ +30 | 4★ không đổi | 3★ -10 | 2★ -20 | 1★ -30
+   */
   private async applyReviewReward(revieweeId: number, rating: number) {
-    if (rating !== 5) return;
+    const deltaByStar: Record<number, number> = {
+      1: -30,
+      2: -20,
+      3: -10,
+      5: 30,
+    };
+    const delta = deltaByStar[rating] ?? 0;
+    if (delta === 0) return;
 
     let score = await this.scoreRepo.findOne({ where: { userId: revieweeId } });
     if (!score) {
@@ -123,12 +134,19 @@ export class ReviewsService {
       );
     }
 
-    // Chỉ ghi log — trigger SQL cộng điểm (tránh cộng 2 lần).
+    // Chỉ ghi log — trigger SQL cập nhật Scores (tránh cộng/trừ 2 lần).
+    const reasonCode =
+      rating === 5 ? 'REVIEW_5_STAR' : `REVIEW_${rating}_STAR`;
+    const note =
+      delta > 0
+        ? `Nhận đánh giá ${rating} sao (+${delta})`
+        : `Nhận đánh giá ${rating} sao (${delta})`;
+
     await this.pointLogRepo.save({
       userId: revieweeId,
-      delta: 30,
-      reasonCode: 'REVIEW_5_STAR',
-      note: 'Nhận đánh giá 5 sao',
+      delta,
+      reasonCode,
+      note,
     });
   }
 

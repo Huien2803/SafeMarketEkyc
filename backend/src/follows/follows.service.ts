@@ -53,6 +53,39 @@ export class FollowsService {
     return this.followRepo.count({ where: { followerId: userId } });
   }
 
+  async listFollowers(userId: number) {
+    const rows = await this.followRepo.find({
+      where: { followeeId: userId },
+      relations: ['follower'],
+      order: { createdAt: 'DESC' },
+    });
+    return rows
+      .map((r) => this.toUserCard(r.follower))
+      .filter((u): u is NonNullable<typeof u> => u != null);
+  }
+
+  async listFollowing(userId: number) {
+    const rows = await this.followRepo.find({
+      where: { followerId: userId },
+      relations: ['followee'],
+      order: { createdAt: 'DESC' },
+    });
+    return rows
+      .map((r) => this.toUserCard(r.followee))
+      .filter((u): u is NonNullable<typeof u> => u != null);
+  }
+
+  private toUserCard(user?: User | null) {
+    if (!user) return null;
+    return {
+      userId: Number(user.userId),
+      displayName: user.displayName ?? null,
+      email: user.email,
+      avatarUrl: user.avatarUrl ?? null,
+      kycStatus: user.kycStatus,
+    };
+  }
+
   async getFolloweeIds(userId: number): Promise<number[]> {
     const rows = await this.followRepo.find({
       where: { followerId: userId },

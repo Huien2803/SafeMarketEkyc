@@ -1,4 +1,5 @@
 import 'package:safemarket_app/models/auth_user.dart';
+import 'package:safemarket_app/services/auth_service.dart';
 
 class ProductListItem {
   const ProductListItem({
@@ -130,10 +131,18 @@ class ProductDetail {
   bool get isAvailable => status == 'Available';
   bool get isSold => status == 'Sold';
   bool get isReserved => status == 'Reserved';
-  bool get isPurchasable => status == 'Available';
+
+  /// Có thể đặt mua (Available + không phải tài khoản admin).
+  bool get isPurchasable {
+    if (AuthService.instance.currentUser?.isAdmin == true) return false;
+    return status == 'Available';
+  }
 
   /// Nhãn nút mua / thông báo khi không mua được.
   String get purchaseBlockedLabel {
+    if (AuthService.instance.currentUser?.isAdmin == true) {
+      return 'Admin không mua hàng';
+    }
     if (isSold) return 'Đã bán';
     if (isReserved) return 'Đã có người đặt';
     if (status == 'Hidden') return 'Không khả dụng';

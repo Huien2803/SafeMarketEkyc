@@ -3,6 +3,7 @@ import 'package:safemarket_app/core/constants/app_decorations.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
 import 'package:safemarket_app/models/sold_listing.dart';
 import 'package:safemarket_app/models/user_profile.dart';
+import 'package:safemarket_app/screens/follow_list_screen.dart';
 import 'package:safemarket_app/screens/product_detail.dart';
 import 'package:safemarket_app/screens/seller_reviews_screen.dart';
 import 'package:safemarket_app/services/auth_service.dart';
@@ -268,13 +269,100 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                     ),
                   ),
                 const SizedBox(height: 12),
-                Text(
-                  '${p.followerCount} người theo dõi • ${p.followingCount} đang theo dõi',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: AppColors.textSecondary,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => FollowListScreen(
+                                userId: p.userId,
+                                mode: FollowListMode.followers,
+                                titleHint: p.displayName ?? p.email,
+                              ),
+                            ),
+                          ).then((_) {
+                            if (mounted) {
+                              setState(() => _shopFuture = _load());
+                            }
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(10),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Column(
+                            children: [
+                              Text(
+                                '${p.followerCount}',
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              const Text(
+                                'Người theo dõi',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      width: 1,
+                      height: 36,
+                      color: const Color(0xFFE5E7EB),
+                    ),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => FollowListScreen(
+                                userId: p.userId,
+                                mode: FollowListMode.following,
+                                titleHint: p.displayName ?? p.email,
+                              ),
+                            ),
+                          ).then((_) {
+                            if (mounted) {
+                              setState(() => _shopFuture = _load());
+                            }
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(10),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Column(
+                            children: [
+                              Text(
+                                '${p.followingCount}',
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              const Text(
+                                'Đang theo dõi',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 if (p.reviewCount > 0) ...[
                   const SizedBox(height: 8),

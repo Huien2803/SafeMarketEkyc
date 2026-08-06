@@ -12,8 +12,6 @@ class OrderService {
   OrderService._();
   static final OrderService instance = OrderService._();
 
-  Map<String, String> get _headers => AuthService.instance.authHeaders;
-
   Future<http.Response> _authGet(Uri uri) =>
       AuthService.instance.authorizedRequest(
         (h) => http.get(uri, headers: h).timeout(ApiConfig.timeout),
@@ -24,6 +22,34 @@ class OrderService {
         (h) =>
             http.post(uri, headers: h, body: body).timeout(ApiConfig.timeout),
       );
+
+  Map<String, dynamic> _decodeMap(http.Response res) {
+    if (res.body.isEmpty) return <String, dynamic>{};
+    try {
+      final decoded = jsonDecode(res.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      return <String, dynamic>{'message': decoded.toString()};
+    } catch (_) {
+      return <String, dynamic>{
+        'message': 'Phản hồi không hợp lệ từ máy chủ (${res.statusCode})',
+      };
+    }
+  }
+
+  Never _throwApi(http.Response res, String fallback) {
+    final body = _decodeMap(res);
+    final msg = body['message'];
+    if (msg is List && msg.isNotEmpty) {
+      throw Exception(msg.map((e) => e.toString()).join('\n'));
+    }
+    if (msg is String && msg.trim().isNotEmpty) {
+      throw Exception(msg);
+    }
+    if (res.statusCode == 401) {
+      throw Exception('Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.');
+    }
+    throw Exception('$fallback (${res.statusCode})');
+  }
 
   Future<OrderItem> createOrder({
     required int productId,
@@ -41,36 +67,30 @@ class OrderService {
         'deliveryMethod': deliveryMethod,
       }),
     );
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
     if (res.statusCode >= 200 && res.statusCode < 300) {
-      return OrderItem.fromJson(body);
+      return OrderItem.fromJson(_decodeMap(res));
     }
-    if (res.statusCode >= 500) {
-      throw Exception('Không tạo được đơn hàng. Vui lòng thử lại sau.');
-    }
-    final msg = body['message'];
-    if (msg is List && msg.isNotEmpty) {
-      throw Exception(msg.join('\n'));
-    }
-    throw Exception(msg is String ? msg : 'Không tạo được đơn hàng (${res.statusCode})');
+    _throwApi(res, 'Không tạo được đơn hàng');
   }
 
   Future<OrderItem> getOrder(int orderId) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/orders/$orderId');
     final res = await _authGet(uri);
     if (res.statusCode != 200) {
-      throw Exception('Không tải được đơn hàng');
+      _throwApi(res, 'Không tải được đơn hàng');
     }
-    return OrderItem.fromJson(
-        jsonDecode(res.body) as Map<String, dynamic>);
+    return OrderItem.fromJson(_decodeMap(res));
   }
 
   Future<List<OrderItem>> getMyOrders() async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/orders/my');
     final res = await _authGet(uri);
     if (res.statusCode != 200) return [];
-    return (jsonDecode(res.body) as List<dynamic>)
-        .map((e) => OrderItem.fromJson(e as Map<String, dynamic>))
+    final decoded = jsonDecode(res.body);
+    if (decoded is! List) return [];
+    return decoded
+        .whereType<Map<String, dynamic>>()
+        .map(OrderItem.fromJson)
         .toList();
   }
 
@@ -97,25 +117,19 @@ class OrderService {
   }) async {
     final uri =
         Uri.parse('${ApiConfig.baseUrl}/orders/$orderId/payment-method');
-    final res = await http
-        .post(
-          uri,
-          headers: _headers,
-          body: jsonEncode({
-            'paymentMethod': paymentMethod,
-            'deliveryMethod': deliveryMethod,
-            if (shippingAddress != null && shippingAddress.isNotEmpty)
-              'shippingAddress': shippingAddress,
-          }),
-        )
-        .timeout(ApiConfig.timeout);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final res = await _authPost(
+      uri,
+      body: jsonEncode({
+        'paymentMethod': paymentMethod,
+        'deliveryMethod': deliveryMethod,
+        if (shippingAddress != null && shippingAddress.isNotEmpty)
+          'shippingAddress': shippingAddress,
+      }),
+    );
     if (res.statusCode >= 200 && res.statusCode < 300) {
-      return OrderItem.fromJson(body);
+      return OrderItem.fromJson(_decodeMap(res));
     }
-    final msg = body['message'];
-    if (msg is List && msg.isNotEmpty) throw Exception(msg.join('\n'));
-    throw Exception(msg is String ? msg : 'Không đổi được phương thức');
+    _throwApi(res, 'Không đổi được phương thức');
   }
 
   Future<OrderItem> markShipped(int orderId) async =>
@@ -137,6 +151,9 @@ class OrderService {
       if (auth != null) req.headers['Authorization'] = auth;
 
       final bytes = await proofImage.readAsBytes();
+      if (bytes.isEmpty) {
+        throw Exception('Ảnh xác nhận trống — vui lòng chụp lại');
+      }
       // Android camera thường trả path không có đuôi / mimetype → server từ chối.
       final rawName = proofImage.name.trim();
       final lower = rawName.toLowerCase();
@@ -164,34 +181,22 @@ class OrderService {
     }
 
     final res = await AuthService.instance.authorizedRequest(send);
-    final body = res.body.isNotEmpty
-        ? jsonDecode(res.body) as Map<String, dynamic>
-        : <String, dynamic>{};
-
     if (res.statusCode >= 200 && res.statusCode < 300) {
-      return OrderItem.fromJson(body);
+      return OrderItem.fromJson(_decodeMap(res));
     }
-    final msg = body['message'];
-    if (msg is List && msg.isNotEmpty) {
-      throw Exception(msg.join('\n'));
-    }
-    throw Exception(msg is String ? msg : 'Không hoàn tất được đơn hàng');
+    _throwApi(res, 'Không hoàn tất được đơn hàng');
   }
 
   Future<OrderItem> cancelOrder(int orderId, {String reason = 'Hủy đơn'}) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/orders/$orderId/cancel');
-    final res = await http
-        .post(
-          uri,
-          headers: _headers,
-          body: jsonEncode({'reason': reason}),
-        )
-        .timeout(ApiConfig.timeout);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final res = await _authPost(
+      uri,
+      body: jsonEncode({'reason': reason}),
+    );
     if (res.statusCode >= 200 && res.statusCode < 300) {
-      return OrderItem.fromJson(body);
+      return OrderItem.fromJson(_decodeMap(res));
     }
-    throw Exception(body['message'] ?? 'Không hủy được đơn');
+    _throwApi(res, 'Không hủy được đơn');
   }
 
   Future<OrderItem> reportDispute({
@@ -200,36 +205,34 @@ class OrderService {
     String note = '',
   }) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/orders/$orderId/dispute');
-    final res = await http
-        .post(
-          uri,
-          headers: _headers,
-          body: jsonEncode({'type': type, 'note': note}),
-        )
-        .timeout(ApiConfig.timeout);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final res = await _authPost(
+      uri,
+      body: jsonEncode({'type': type, 'note': note}),
+    );
     if (res.statusCode >= 200 && res.statusCode < 300) {
-      return OrderItem.fromJson(body);
+      return OrderItem.fromJson(_decodeMap(res));
     }
-    throw Exception(body['message'] ?? 'Không gửi được khiếu nại');
+    _throwApi(res, 'Không gửi được khiếu nại');
   }
 
   Future<OrderItem> _postAction(int orderId, String action) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/orders/$orderId/$action');
     final res = await _authPost(uri);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
     if (res.statusCode >= 200 && res.statusCode < 300) {
-      return OrderItem.fromJson(body);
+      return OrderItem.fromJson(_decodeMap(res));
     }
-    throw Exception(body['message'] ?? 'Thao tác thất bại');
+    _throwApi(res, 'Thao tác thất bại');
   }
 
   Future<List<SoldListing>> getSoldProducts() async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/users/me/sold-products');
     final res = await _authGet(uri);
     if (res.statusCode != 200) return [];
-    return (jsonDecode(res.body) as List<dynamic>)
-        .map((e) => SoldListing.fromJson(e as Map<String, dynamic>))
+    final decoded = jsonDecode(res.body);
+    if (decoded is! List) return [];
+    return decoded
+        .whereType<Map<String, dynamic>>()
+        .map(SoldListing.fromJson)
         .toList();
   }
 
@@ -237,8 +240,11 @@ class OrderService {
     final uri = Uri.parse('${ApiConfig.baseUrl}/users/$userId/listings');
     final res = await _authGet(uri);
     if (res.statusCode != 200) return [];
-    return (jsonDecode(res.body) as List<dynamic>)
-        .map((e) => SoldListing.fromJson(e as Map<String, dynamic>))
+    final decoded = jsonDecode(res.body);
+    if (decoded is! List) return [];
+    return decoded
+        .whereType<Map<String, dynamic>>()
+        .map(SoldListing.fromJson)
         .toList();
   }
 }

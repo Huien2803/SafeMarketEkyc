@@ -164,8 +164,11 @@ class OrderItem {
     }
   }
 
-  /// Người mua chỉ xác nhận nhận hàng sau khi người bán đã giao.
+  /// Người mua chỉ xác nhận nhận hàng sau khi người bán đã giao (Shipped).
+  /// Paid + CASH + DIRECT: đơn cũ (trước đây handover ghi Paid).
   bool get buyerCanConfirmReceived =>
       orderStatus == 'Shipped' ||
-      (isDirectDelivery && orderStatus == 'Paid');
+      (orderStatus == 'Paid' &&
+          paymentMethod == 'CASH' &&
+          isDirectDelivery);
 }

@@ -24,6 +24,43 @@ class FollowStatus {
   }
 }
 
+class FollowUserItem {
+  const FollowUserItem({
+    required this.userId,
+    required this.email,
+    this.displayName,
+    this.avatarUrl,
+    this.kycStatus,
+  });
+
+  final int userId;
+  final String email;
+  final String? displayName;
+  final String? avatarUrl;
+  final String? kycStatus;
+
+  String get label =>
+      (displayName != null && displayName!.trim().isNotEmpty)
+          ? displayName!.trim()
+          : email;
+
+  String get initials {
+    final s = label.trim();
+    if (s.isEmpty) return '?';
+    return s.substring(0, 1).toUpperCase();
+  }
+
+  factory FollowUserItem.fromJson(Map<String, dynamic> json) {
+    return FollowUserItem(
+      userId: (json['userId'] as num).toInt(),
+      email: json['email'] as String? ?? '',
+      displayName: json['displayName'] as String?,
+      avatarUrl: json['avatarUrl'] as String?,
+      kycStatus: json['kycStatus'] as String?,
+    );
+  }
+}
+
 class FollowService {
   FollowService._();
   static final FollowService instance = FollowService._();
@@ -69,5 +106,35 @@ class FollowService {
     return FollowStatus.fromJson(
       jsonDecode(res.body) as Map<String, dynamic>,
     );
+  }
+
+  Future<List<FollowUserItem>> listFollowers(int userId) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/follows/$userId/followers');
+    final res =
+        await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
+    if (res.statusCode != 200) {
+      throw Exception('Không tải được danh sách người theo dõi');
+    }
+    final raw = jsonDecode(res.body);
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map<String, dynamic>>()
+        .map(FollowUserItem.fromJson)
+        .toList();
+  }
+
+  Future<List<FollowUserItem>> listFollowing(int userId) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/follows/$userId/following');
+    final res =
+        await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
+    if (res.statusCode != 200) {
+      throw Exception('Không tải được danh sách đang theo dõi');
+    }
+    final raw = jsonDecode(res.body);
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map<String, dynamic>>()
+        .map(FollowUserItem.fromJson)
+        .toList();
   }
 }

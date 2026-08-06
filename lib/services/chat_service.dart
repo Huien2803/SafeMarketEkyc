@@ -4,6 +4,7 @@ import 'package:safemarket_app/models/product.dart';
 import 'package:safemarket_app/services/auth_service.dart';
 import 'package:safemarket_app/services/firebase_chat_service.dart';
 import 'package:safemarket_app/services/order_service.dart';
+import 'package:safemarket_app/services/product_service.dart';
 import 'package:safemarket_app/services/user_service.dart';
 
 /// Chat realtime (Firebase) + đơn hàng (NestJS API).
@@ -47,8 +48,60 @@ class ChatService {
     );
   }
 
-  Future<ChatThreadDetail> getThreadDetail(String threadId) {
-    return _firebase.getThreadDetail(threadId);
+  Future<ChatThreadDetail> getThreadDetail(String threadId) async {
+    var detail = await _firebase.getThreadDetail(threadId);
+
+    // Đồng bộ trạng thái SP từ API (sau hủy đơn → Available).
+    final productId = detail.productId;
+    if (productId != null) {
+      try {
+        final product =
+            await ProductService.instance.getProductDetail(productId);
+        detail = detail.copyWith(productStatus: product.status);
+      } catch (_) {}
+    }
+
+    final orderId = detail.orderId;
+    if (orderId == null) return detail;
+    try {
+      final order = await OrderService.instance.getOrder(orderId);
+      if (order.orderStatus == 'Cancelled') {
+        // Gỡ order khỏi thread chat để hiện lại nút Đặt mua.
+        await _firebase.clearThreadOrder(threadId);
+        return detail.copyWith(
+          clearOrderId: true,
+          orderStatus: 'Cancelled',
+          productStatus: detail.productStatus == 'Reserved'
+              ? 'Available'
+              : detail.productStatus,
+        );
+      }
+      return detail.copyWith(
+        orderStatus: order.orderStatus,
+        paymentMethod: order.paymentMethod,
+        orderId: order.orderId,
+      );
+    } catch (_) {
+      return detail;
+    }
+  }
+
+  /// Sau khi hủy đơn: gỡ orderId trên mọi thread Firebase liên quan.
+  Future<void> releaseCancelledOrder(int orderId) async {
+    final userId = AuthService.instance.currentUser?.userId ?? 0;
+    if (userId == 0) return;
+    try {
+      final threads = await _firebase.watchUserThreads(userId).first;
+      for (final t in threads) {
+        if (t.orderId == orderId) {
+          await _firebase.clearThreadOrder(t.threadId);
+          await _firebase.markPurchaseRequestsCancelled(
+            t.threadId,
+            orderId,
+          );
+        }
+      }
+    } catch (_) {}
   }
 
   /// @deprecated Dùng [watchThreads] cho realtime
@@ -207,6 +260,18 @@ class ChatService {
       messageId: messageId,
       orderId: orderId,
     );
+  }
+
+  Future<void> syncThreadOrderFromApi(String threadId, int orderId) async {
+    try {
+      final order = await OrderService.instance.getOrder(orderId);
+      await _firebase.syncThreadOrderStatus(
+        threadId: threadId,
+        orderId: orderId,
+        orderStatus: order.orderStatus,
+        paymentMethod: order.paymentMethod,
+      );
+    } catch (_) {}
   }
 }
 

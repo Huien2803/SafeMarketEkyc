@@ -199,6 +199,7 @@ class FirebaseChatService {
       thumbnailUrl: data['thumbnailUrl'] as String?,
       orderId: (data['orderId'] as num?)?.toInt(),
       orderStatus: data['orderStatus'] as String?,
+      paymentMethod: data['paymentMethod'] as String?,
       amBuyer: myId == (data['buyerId'] as num).toInt(),
       amSeller: myId == (data['sellerId'] as num).toInt(),
     );
@@ -356,6 +357,8 @@ class FirebaseChatService {
 
     await _root.child('threads').child(threadId).update({
       'orderId': orderId,
+      'orderStatus': 'Pending',
+      'paymentMethod': paymentMethod,
       'updatedAt': now,
     });
 
@@ -396,6 +399,7 @@ class FirebaseChatService {
 
     await _root.child('threads').child(threadId).update({
       'orderId': orderId,
+      'orderStatus': 'Paid',
       'updatedAt': now,
     });
 
@@ -406,6 +410,69 @@ class FirebaseChatService {
       orderId: orderId,
       senderId: user.userId,
     );
+  }
+
+  /// Đồng bộ trạng thái đơn lên Firebase (sau thanh toán / hủy).
+  Future<void> syncThreadOrderStatus({
+    required String threadId,
+    required int orderId,
+    required String orderStatus,
+    String? paymentMethod,
+  }) async {
+    if (orderStatus == 'Cancelled') {
+      await clearThreadOrder(threadId);
+      await markPurchaseRequestsCancelled(threadId, orderId);
+      return;
+    }
+    final updates = <String, dynamic>{
+      'orderId': orderId,
+      'orderStatus': orderStatus,
+      'updatedAt': DateTime.now().millisecondsSinceEpoch,
+    };
+    if (paymentMethod != null) {
+      updates['paymentMethod'] = paymentMethod;
+    }
+    await _root.child('threads').child(threadId).update(updates);
+  }
+
+  /// Hủy đơn → gỡ orderId để chat hiện lại «Đặt mua».
+  Future<void> clearThreadOrder(String threadId) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await _root.child('threads').child(threadId).update({
+      'orderId': null,
+      'orderStatus': 'Cancelled',
+      'productStatus': 'Available',
+      'updatedAt': now,
+    });
+  }
+
+  /// Đánh dấu các thẻ yêu cầu mua của đơn đã hủy.
+  Future<void> markPurchaseRequestsCancelled(
+    String threadId,
+    int orderId,
+  ) async {
+    final snap = await _root.child('messages').child(threadId).get();
+    if (!snap.exists || snap.value == null) return;
+    final raw = Map<dynamic, dynamic>.from(snap.value as Map);
+    for (final entry in raw.entries) {
+      final data = Map<dynamic, dynamic>.from(entry.value as Map);
+      if (data['messageType'] != 'PURCHASE_REQUEST') continue;
+      final meta = data['meta'] is Map
+          ? Map<String, dynamic>.from(data['meta'] as Map)
+          : <String, dynamic>{};
+      final metaOrderId = (meta['orderId'] as num?)?.toInt();
+      if (metaOrderId != orderId) continue;
+      if ((meta['status'] as String?) == 'cancelled') continue;
+      meta['status'] = 'cancelled';
+      await _root
+          .child('messages')
+          .child(threadId)
+          .child(entry.key.toString())
+          .update({
+        'meta': meta,
+        'body': 'Đã hủy yêu cầu mua hàng',
+      });
+    }
   }
 
   Future<void> _touchThread(

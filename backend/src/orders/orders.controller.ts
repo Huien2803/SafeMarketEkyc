@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -109,7 +110,12 @@ export class OrdersController {
     @Param('orderId', ParseIntPipe) orderId: number,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const proofUrl = file?.filename ? toPublicOrderProofPath(file.filename) : null;
+    if (!file?.filename) {
+      throw new BadRequestException(
+        'Bắt buộc chụp/gửi ảnh xác nhận đã nhận hàng — không thể hoàn tất đơn thiếu ảnh',
+      );
+    }
+    const proofUrl = toPublicOrderProofPath(file.filename);
     return this.ordersService.complete(orderId, Number(user.userId), proofUrl);
   }
 
@@ -117,9 +123,9 @@ export class OrdersController {
   cancel(
     @CurrentUser() user: User,
     @Param('orderId', ParseIntPipe) orderId: number,
-    @Body() dto: CancelOrderDto,
+    @Body() dto: CancelOrderDto = {},
   ) {
-    return this.ordersService.cancel(orderId, Number(user.userId), dto);
+    return this.ordersService.cancel(orderId, Number(user.userId), dto ?? {});
   }
 
   @Post(':orderId/dispute')

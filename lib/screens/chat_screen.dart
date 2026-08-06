@@ -6,6 +6,7 @@ import 'package:safemarket_app/core/theme/app_colors.dart';
 import 'package:safemarket_app/models/chat.dart';
 import 'package:safemarket_app/screens/order_detail_screen.dart';
 import 'package:safemarket_app/services/api_config.dart';
+import 'package:safemarket_app/services/auth_service.dart';
 import 'package:safemarket_app/services/chat_service.dart';
 import 'package:safemarket_app/services/chat_upload_service.dart';
 import 'package:safemarket_app/widgets/chat_product_card.dart';
@@ -67,8 +68,8 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
-  Future<void> _loadThread() async {
-    setState(() => _loadingThread = true);
+  Future<void> _loadThread({bool showLoading = true}) async {
+    if (showLoading) setState(() => _loadingThread = true);
     try {
       final detail =
           await ChatService.instance.getThreadDetail(widget.threadId);
@@ -80,7 +81,7 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _loadingThread = false);
+      if (mounted && showLoading) setState(() => _loadingThread = false);
     }
   }
 
@@ -147,7 +148,18 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _purchaseInChat() async {
     final t = _thread;
-    if (t == null || !t.canPurchaseInChat) return;
+    if (t == null || !t.canPurchaseInChat) {
+      if (mounted && AuthService.instance.currentUser?.isAdmin == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Tài khoản quản trị không được mua sản phẩm.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
 
     final choice = await showPurchaseMethodDialog(
       context,
@@ -181,14 +193,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ? SnackBarAction(
                     label: 'Thanh toán',
                     onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute<void>(
-                          builder: (_) => OrderDetailScreen(
-                            orderId: detail.orderId!,
-                          ),
-                        ),
-                      );
+                      _openOrderDetail(detail.orderId!);
                     },
                   )
                 : null,
@@ -210,6 +215,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_busy || !msg.isPendingPurchase) return;
     setState(() => _busy = true);
     try {
+      await _loadThread(showLoading: false);
       await ChatService.instance.confirmSale(widget.threadId, msg.messageId);
       final detail =
           await ChatService.instance.getThreadDetail(widget.threadId);
@@ -231,6 +237,18 @@ class _ChatScreenState extends State<ChatScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _openOrderDetail(int orderId) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => OrderDetailScreen(orderId: orderId),
+      ),
+    );
+    if (!mounted) return;
+    await ChatService.instance.syncThreadOrderFromApi(widget.threadId, orderId);
+    await _loadThread();
   }
 
   @override
@@ -266,7 +284,7 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          if (t != null && t.productId != null)
+          if (t != null && t.showProductStrip)
             _ProductStrip(
               thread: t,
               busy: _busy,
@@ -291,6 +309,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           thread: t,
                           busy: _busy,
                           onConfirmSale: _confirmSale,
+                          onOpenOrder: _openOrderDetail,
                           onReply: _startReply,
                         ),
                       ),
@@ -358,7 +377,6 @@ class _ProductStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasOrder = thread.orderId != null;
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
@@ -412,12 +430,7 @@ class _ProductStrip extends StatelessWidget {
               ],
             ),
           ),
-          if (hasOrder)
-            const Chip(
-              label: Text('Đã đặt mua', style: TextStyle(fontSize: 11)),
-              backgroundColor: AppColors.ekycVerifiedBg,
-            )
-          else if (thread.canPurchaseInChat)
+          if (thread.canPurchaseInChat)
             FilledButton(
               onPressed: busy ? null : onPurchase,
               style: FilledButton.styleFrom(
@@ -453,6 +466,7 @@ class _MessageBubble extends StatelessWidget {
     required this.thread,
     required this.busy,
     required this.onConfirmSale,
+    required this.onOpenOrder,
     required this.onReply,
   });
 
@@ -460,6 +474,7 @@ class _MessageBubble extends StatelessWidget {
   final ChatThreadDetail? thread;
   final bool busy;
   final void Function(ChatMessage) onConfirmSale;
+  final void Function(int orderId) onOpenOrder;
   final void Function(ChatMessage) onReply;
 
   @override
@@ -538,6 +553,7 @@ class _MessageBubble extends StatelessWidget {
         thread: thread,
         busy: busy,
         onConfirmSale: onConfirmSale,
+        onOpenOrder: onOpenOrder,
       );
     }
 
@@ -712,12 +728,14 @@ class _SpecialCard extends StatelessWidget {
     required this.thread,
     required this.busy,
     required this.onConfirmSale,
+    required this.onOpenOrder,
   });
 
   final ChatMessage message;
   final ChatThreadDetail? thread;
   final bool busy;
   final void Function(ChatMessage) onConfirmSale;
+  final void Function(int orderId) onOpenOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -732,7 +750,20 @@ class _SpecialCard extends StatelessWidget {
     final isDirect = meta['deliveryMethod'] == 'DIRECT';
     final isConfirmed = message.isSaleConfirmed ||
         (message.isPurchaseRequest && !message.isPendingPurchase);
-    final orderId = (meta['orderId'] as num?)?.toInt();
+    final orderId = (meta['orderId'] as num?)?.toInt() ?? thread?.orderId;
+    final payMethod =
+        thread?.paymentMethod ?? meta['paymentMethod'] as String?;
+    final isOnlineEscrow = payMethod == 'ONLINE_ESCROW';
+    final buyerNeedsPay = message.isPendingPurchase &&
+        thread?.amBuyer == true &&
+        (thread?.needsBuyerOnlinePayment ?? false);
+    final sellerWaitingPay = message.isPendingPurchase &&
+        thread?.amSeller == true &&
+        isOnlineEscrow &&
+        (thread?.needsBuyerOnlinePayment ?? false);
+    final sellerCanConfirm = message.isPendingPurchase &&
+        thread?.amSeller == true &&
+        (thread?.sellerCanConfirmPurchase ?? !isOnlineEscrow);
 
     return Align(
       alignment: Alignment.center,
@@ -768,14 +799,18 @@ class _SpecialCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    message.isSaleConfirmed
-                        ? 'Đã xác nhận bán'
-                        : 'Yêu cầu đặt mua',
+                    message.isCancelledPurchase
+                        ? 'Đã hủy yêu cầu mua'
+                        : message.isSaleConfirmed
+                            ? 'Đã xác nhận bán'
+                            : 'Yêu cầu đặt mua',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: isConfirmed
-                          ? AppColors.trustGreen
-                          : AppColors.primary,
+                      color: message.isCancelledPurchase
+                          ? AppColors.textMuted
+                          : isConfirmed
+                              ? AppColors.trustGreen
+                              : AppColors.primary,
                     ),
                   ),
                 ),
@@ -865,7 +900,27 @@ class _SpecialCard extends StatelessWidget {
                 ],
               ),
             ],
-            if (message.isPendingPurchase && thread?.amSeller == true) ...[
+            if (sellerWaitingPay) ...[
+              const SizedBox(height: 12),
+              const Text(
+                'Chờ khách thanh toán online (escrow). '
+                'Sau khi khách trả xong bạn mới xác nhận bán được.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textMuted,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+              if (orderId != null) ...[
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: () => onOpenOrder(orderId!),
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Làm mới / xem đơn'),
+                ),
+              ],
+            ],
+            if (sellerCanConfirm) ...[
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
@@ -879,10 +934,46 @@ class _SpecialCard extends StatelessWidget {
                 ),
               ),
             ],
-            if (message.isPendingPurchase && thread?.amBuyer == true) ...[
+            if (buyerNeedsPay) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: busy ? null : () => onOpenOrder(orderId!),
+                  icon: const Icon(Icons.payment_outlined),
+                  label: const Text('Thanh toán online (Escrow)'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.trustGreen,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Nếu bạn thoát giữa chừng, bấm lại nút này để tiếp tục thanh toán.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textMuted,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ] else if (message.isPendingPurchase &&
+                thread?.amBuyer == true) ...[
+              const SizedBox(height: 8),
+              Text(
+                isOnlineEscrow && !(thread?.needsBuyerOnlinePayment ?? true)
+                    ? 'Đã thanh toán escrow — chờ người bán xác nhận...'
+                    : 'Đang chờ người bán xác nhận...',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textMuted,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+            if (message.isCancelledPurchase) ...[
               const SizedBox(height: 8),
               const Text(
-                'Đang chờ người bán xác nhận...',
+                'Yêu cầu mua này đã bị hủy. Bạn có thể đặt mua lại nếu sản phẩm còn.',
                 style: TextStyle(
                   fontSize: 12,
                   color: AppColors.textMuted,
@@ -893,14 +984,7 @@ class _SpecialCard extends StatelessWidget {
             if (isConfirmed && orderId != null) ...[
               const SizedBox(height: 10),
               TextButton.icon(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => OrderDetailScreen(orderId: orderId),
-                    ),
-                  );
-                },
+                onPressed: () => onOpenOrder(orderId),
                 icon: const Icon(Icons.receipt_long),
                 label: Text('Xem đơn hàng #$orderId'),
               ),

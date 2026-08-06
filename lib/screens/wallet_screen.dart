@@ -342,6 +342,193 @@ class _BalanceCard extends StatelessWidget {
   }
 }
 
+class _BankInfo {
+  const _BankInfo({
+    required this.code,
+    required this.shortName,
+    required this.fullName,
+    required this.color,
+  });
+
+  final String code;
+  final String shortName;
+  final String fullName;
+  final Color color;
+
+  String get displayName => '$shortName ($code)';
+}
+
+const _kBanks = <_BankInfo>[
+  _BankInfo(
+    code: 'MB',
+    shortName: 'MBBank',
+    fullName: 'Ngân hàng TMCP Quân đội',
+    color: Color(0xFF141ED2),
+  ),
+  _BankInfo(
+    code: 'MBV',
+    shortName: 'Việt Nam Hiện Đại',
+    fullName: 'Ngân hàng TNHH MTV Việt Nam Hiện Đại (MBV)',
+    color: Color(0xFFE30613),
+  ),
+  _BankInfo(
+    code: 'VBA',
+    shortName: 'Agribank',
+    fullName: 'Ngân hàng Nông nghiệp và Phát triển Nông thôn Việt Nam',
+    color: Color(0xFFC8102E),
+  ),
+  _BankInfo(
+    code: 'VCB',
+    shortName: 'Vietcombank',
+    fullName: 'Ngân hàng TMCP Ngoại thương Việt Nam',
+    color: Color(0xFF007A33),
+  ),
+  _BankInfo(
+    code: 'CTG',
+    shortName: 'VietinBank',
+    fullName: 'Ngân hàng TMCP Công thương Việt Nam',
+    color: Color(0xFF0055A5),
+  ),
+  _BankInfo(
+    code: 'BIDV',
+    shortName: 'BIDV',
+    fullName: 'Ngân hàng TMCP Đầu tư và Phát triển Việt Nam',
+    color: Color(0xFF0066B3),
+  ),
+  _BankInfo(
+    code: 'TCB',
+    shortName: 'Techcombank',
+    fullName: 'Ngân hàng TMCP Kỹ thương Việt Nam',
+    color: Color(0xFFED1C24),
+  ),
+  _BankInfo(
+    code: 'ACB',
+    shortName: 'ACB',
+    fullName: 'Ngân hàng TMCP Á Châu',
+    color: Color(0xFF003D7C),
+  ),
+  _BankInfo(
+    code: 'VPB',
+    shortName: 'VPBank',
+    fullName: 'Ngân hàng TMCP Việt Nam Thịnh Vượng',
+    color: Color(0xFF00A651),
+  ),
+  _BankInfo(
+    code: 'TPB',
+    shortName: 'TPBank',
+    fullName: 'Ngân hàng TMCP Tiên Phong',
+    color: Color(0xFF7B2D8E),
+  ),
+  _BankInfo(
+    code: 'STB',
+    shortName: 'Sacombank',
+    fullName: 'Ngân hàng TMCP Sài Gòn Thương Tín',
+    color: Color(0xFF003B7A),
+  ),
+  _BankInfo(
+    code: 'VIB',
+    shortName: 'VIB',
+    fullName: 'Ngân hàng TMCP Quốc tế Việt Nam',
+    color: Color(0xFF0066B3),
+  ),
+  _BankInfo(
+    code: 'MSB',
+    shortName: 'MSB',
+    fullName: 'Ngân hàng TMCP Hàng Hải Việt Nam',
+    color: Color(0xFF003366),
+  ),
+  _BankInfo(
+    code: 'SHB',
+    shortName: 'SHB',
+    fullName: 'Ngân hàng TMCP Sài Gòn – Hà Nội',
+    color: Color(0xFFEE1C25),
+  ),
+  _BankInfo(
+    code: 'OCB',
+    shortName: 'OCB',
+    fullName: 'Ngân hàng TMCP Phương Đông',
+    color: Color(0xFF00A651),
+  ),
+  _BankInfo(
+    code: 'HDB',
+    shortName: 'HDBank',
+    fullName: 'Ngân hàng TMCP Phát triển Thành phố Hồ Chí Minh',
+    color: Color(0xFFE30613),
+  ),
+  _BankInfo(
+    code: 'LPB',
+    shortName: 'LienVietPostBank',
+    fullName: 'Ngân hàng TMCP Bưu điện Liên Việt',
+    color: Color(0xFF00843D),
+  ),
+  _BankInfo(
+    code: 'SEAB',
+    shortName: 'SeABank',
+    fullName: 'Ngân hàng TMCP Đông Nam Á',
+    color: Color(0xFF003DA5),
+  ),
+  _BankInfo(
+    code: 'ABB',
+    shortName: 'ABBank',
+    fullName: 'Ngân hàng TMCP An Bình',
+    color: Color(0xFF0054A6),
+  ),
+  _BankInfo(
+    code: 'BVB',
+    shortName: 'BaoVietBank',
+    fullName: 'Ngân hàng TMCP Bảo Việt',
+    color: Color(0xFF0066B3),
+  ),
+  _BankInfo(
+    code: 'NAB',
+    shortName: 'NamABank',
+    fullName: 'Ngân hàng TMCP Nam Á',
+    color: Color(0xFF0066B3),
+  ),
+  _BankInfo(
+    code: 'PGB',
+    shortName: 'PGBank',
+    fullName: 'Ngân hàng TMCP Xăng dầu Petrolimex',
+    color: Color(0xFFEE1C25),
+  ),
+  _BankInfo(
+    code: 'VAB',
+    shortName: 'VietABank',
+    fullName: 'Ngân hàng TMCP Việt Á',
+    color: Color(0xFF0066B3),
+  ),
+  _BankInfo(
+    code: 'BAB',
+    shortName: 'BacABank',
+    fullName: 'Ngân hàng TMCP Bắc Á',
+    color: Color(0xFF0066B3),
+  ),
+  _BankInfo(
+    code: 'PVCB',
+    shortName: 'PVcomBank',
+    fullName: 'Ngân hàng TMCP Đại Chúng Việt Nam',
+    color: Color(0xFFEE7623),
+  ),
+  _BankInfo(
+    code: 'SCB',
+    shortName: 'SCB',
+    fullName: 'Ngân hàng TMCP Sài Gòn',
+    color: Color(0xFF0066B3),
+  ),
+  _BankInfo(
+    code: 'EXIM',
+    shortName: 'Eximbank',
+    fullName: 'Ngân hàng TMCP Xuất Nhập khẩu Việt Nam',
+    color: Color(0xFF003DA5),
+  ),
+  _BankInfo(
+    code: 'KLB',
+    shortName: 'KienlongBank',
+    fullName: 'Ngân hàng TMCP Kiên Long',
+    color: Color(0xFF00A651),
+  ),
+];
+
 class _WithdrawSheet extends StatefulWidget {
   const _WithdrawSheet({required this.wallet});
   final WalletInfo wallet;
@@ -352,9 +539,9 @@ class _WithdrawSheet extends StatefulWidget {
 
 class _WithdrawSheetState extends State<_WithdrawSheet> {
   final _amountCtrl = TextEditingController();
-  final _bankCtrl = TextEditingController();
   final _accountCtrl = TextEditingController();
   final _holderCtrl = TextEditingController();
+  _BankInfo? _selectedBank;
   bool _submitting = false;
 
   @override
@@ -368,10 +555,24 @@ class _WithdrawSheetState extends State<_WithdrawSheet> {
   @override
   void dispose() {
     _amountCtrl.dispose();
-    _bankCtrl.dispose();
     _accountCtrl.dispose();
     _holderCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickBank() async {
+    final bank = await showModalBottomSheet<_BankInfo>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => const _BankPickerSheet(),
+    );
+    if (bank != null && mounted) {
+      setState(() => _selectedBank = bank);
+    }
   }
 
   Future<void> _submit() async {
@@ -384,7 +585,7 @@ class _WithdrawSheetState extends State<_WithdrawSheet> {
       _snack('Số tiền vượt quá số dư (${widget.wallet.balanceFormatted})');
       return;
     }
-    if (_bankCtrl.text.trim().isEmpty ||
+    if (_selectedBank == null ||
         _accountCtrl.text.trim().isEmpty ||
         _holderCtrl.text.trim().isEmpty) {
       _snack('Vui lòng nhập đầy đủ thông tin ngân hàng');
@@ -394,7 +595,7 @@ class _WithdrawSheetState extends State<_WithdrawSheet> {
     try {
       final msg = await WalletService.instance.requestWithdrawal(
         amount: amount,
-        bankName: _bankCtrl.text.trim(),
+        bankName: _selectedBank!.displayName,
         bankAccount: _accountCtrl.text.trim(),
         accountHolder: _holderCtrl.text.trim(),
       );
@@ -415,6 +616,7 @@ class _WithdrawSheetState extends State<_WithdrawSheet> {
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).viewInsets.bottom;
+    final bank = _selectedBank;
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 16, 20, 20 + bottom),
       child: Column(
@@ -449,9 +651,24 @@ class _WithdrawSheetState extends State<_WithdrawSheet> {
             decoration: _dec('Số tiền (VND)', Icons.payments_outlined),
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _bankCtrl,
-            decoration: _dec('Ngân hàng', Icons.account_balance_outlined),
+          InkWell(
+            onTap: _pickBank,
+            borderRadius: BorderRadius.circular(12),
+            child: InputDecorator(
+              decoration: _dec('Ngân hàng', Icons.account_balance_outlined)
+                  .copyWith(
+                suffixIcon: const Icon(Icons.keyboard_arrow_down),
+              ),
+              child: Text(
+                bank?.displayName ?? 'Chọn ngân hàng',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: bank == null
+                      ? AppColors.textMuted
+                      : AppColors.textPrimary,
+                ),
+              ),
+            ),
           ),
           const SizedBox(height: 12),
           TextField(
@@ -492,4 +709,148 @@ class _WithdrawSheetState extends State<_WithdrawSheet> {
         prefixIcon: Icon(icon),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       );
+}
+
+class _BankPickerSheet extends StatefulWidget {
+  const _BankPickerSheet();
+
+  @override
+  State<_BankPickerSheet> createState() => _BankPickerSheetState();
+}
+
+class _BankPickerSheetState extends State<_BankPickerSheet> {
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  List<_BankInfo> get _filtered {
+    final q = _normalize(_query);
+    if (q.isEmpty) return _kBanks;
+    return _kBanks.where((b) {
+      return _normalize(b.shortName).contains(q) ||
+          _normalize(b.fullName).contains(q) ||
+          _normalize(b.code).contains(q) ||
+          _normalize(b.displayName).contains(q);
+    }).toList();
+  }
+
+  String _normalize(String s) {
+    const from = 'àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ';
+    const to = 'aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyyd';
+    var out = s.toLowerCase();
+    for (var i = 0; i < from.length; i++) {
+      out = out.replaceAll(from[i], to[i]);
+    }
+    return out;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final banks = _filtered;
+    final height = MediaQuery.of(context).size.height * 0.75;
+    return SizedBox(
+      height: height,
+      child: Column(
+        children: [
+          const SizedBox(height: 10),
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: AppColors.textMuted.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Text(
+              'Chọn ngân hàng',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF0D1B4C),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              controller: _searchCtrl,
+              autofocus: true,
+              onChanged: (v) => setState(() => _query = v),
+              decoration: InputDecoration(
+                hintText: 'Tìm theo tên ngân hàng',
+                suffixIcon: const Icon(Icons.search),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: banks.isEmpty
+                ? const Center(
+                    child: Text(
+                      'Không tìm thấy ngân hàng',
+                      style: TextStyle(color: AppColors.textSecondary),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: banks.length,
+                    separatorBuilder: (_, __) => const Divider(
+                      height: 1,
+                      indent: 72,
+                    ),
+                    itemBuilder: (context, index) {
+                      final b = banks[index];
+                      return ListTile(
+                        leading: CircleAvatar(
+                          radius: 22,
+                          backgroundColor: b.color,
+                          child: Text(
+                            b.code.length <= 3
+                                ? b.code
+                                : b.code.substring(0, 3),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                        title: Text(
+                          b.displayName,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF0D1B4C),
+                          ),
+                        ),
+                        subtitle: Text(
+                          b.fullName,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                        onTap: () => Navigator.pop(context, b),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
 }

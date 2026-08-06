@@ -13,6 +13,7 @@ import 'package:safemarket_app/screens/edit_profile_screen.dart';
 import 'package:safemarket_app/screens/seller_reviews_screen.dart';
 import 'package:safemarket_app/screens/product_detail.dart';
 import 'package:safemarket_app/screens/wallet_screen.dart';
+import 'package:safemarket_app/screens/follow_list_screen.dart';
 import 'package:safemarket_app/services/order_service.dart';
 import 'package:safemarket_app/services/user_service.dart';
 import 'package:safemarket_app/widgets/product_status_badge.dart';
@@ -285,6 +286,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   ),
                                 ),
                               );
+                            },
+                          ),
+                          const SizedBox(height: 10),
+                          _FollowStatsRow(
+                            followerCount: profile.followerCount,
+                            followingCount: profile.followingCount,
+                            onFollowersTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => FollowListScreen(
+                                    userId: profile.userId,
+                                    mode: FollowListMode.followers,
+                                    titleHint:
+                                        profile.displayName ?? profile.email,
+                                  ),
+                                ),
+                              ).then((_) => _refresh());
+                            },
+                            onFollowingTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => FollowListScreen(
+                                    userId: profile.userId,
+                                    mode: FollowListMode.following,
+                                    titleHint:
+                                        profile.displayName ?? profile.email,
+                                  ),
+                                ),
+                              ).then((_) => _refresh());
                             },
                           ),
                           const SizedBox(height: 20),
@@ -739,6 +771,43 @@ class _StatsRow extends StatelessWidget {
                 : '—',
             label: 'ĐÁNH GIÁ (${profile.reviewCount})',
             onTap: onReviewsTap,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FollowStatsRow extends StatelessWidget {
+  const _FollowStatsRow({
+    required this.followerCount,
+    required this.followingCount,
+    required this.onFollowersTap,
+    required this.onFollowingTap,
+  });
+
+  final int followerCount;
+  final int followingCount;
+  final VoidCallback onFollowersTap;
+  final VoidCallback onFollowingTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _StatCard(
+            value: '$followerCount',
+            label: 'NGƯỜI THEO DÕI',
+            onTap: onFollowersTap,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _StatCard(
+            value: '$followingCount',
+            label: 'ĐANG THEO DÕI',
+            onTap: onFollowingTap,
           ),
         ),
       ],

@@ -14,7 +14,7 @@ class AuthGate extends StatefulWidget {
 }
 
 class _AuthGateState extends State<AuthGate> {
-  late final Future<void> _initFuture;
+  late Future<void> _initFuture;
 
   @override
   void initState() {

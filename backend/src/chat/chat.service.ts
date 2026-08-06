@@ -88,6 +88,23 @@ export class ChatService {
       ? await this.productRepo.findOne({ where: { productId: t.productId } })
       : null;
 
+    let orderStatus: string | null = null;
+    let paymentMethod: string | null = null;
+    let deliveryMethod: string | null = null;
+    if (t.orderId) {
+      try {
+        const order = await this.ordersService.getOrder(
+          Number(t.orderId),
+          userId,
+        );
+        orderStatus = (order.orderStatus as string) ?? null;
+        paymentMethod = (order.paymentMethod as string) ?? null;
+        deliveryMethod = (order.deliveryMethod as string) ?? null;
+      } catch {
+        // Đơn có thể đã bị xóa / không truy cập được — giữ null
+      }
+    }
+
     return {
       threadId: Number(t.threadId),
       buyerId: Number(t.buyerId),
@@ -103,7 +120,9 @@ export class ChatService {
       productLocation: product?.location ?? null,
       thumbnailUrl: product?.thumbnailUrl ?? null,
       orderId: t.orderId ? Number(t.orderId) : null,
-      orderStatus: null,
+      orderStatus,
+      paymentMethod,
+      deliveryMethod,
       amBuyer: Number(t.buyerId) === userId,
       amSeller: Number(t.sellerId) === userId,
     };
@@ -195,7 +214,10 @@ export class ChatService {
     await this.messageRepo.save(msg);
 
     if (thread.orderId) {
-      await this.ordersService.confirmPayment(Number(thread.orderId), sellerId);
+      await this.ordersService.confirmSaleFromChat(
+        Number(thread.orderId),
+        sellerId,
+      );
     }
 
     return this.getMessages(threadId, sellerId);

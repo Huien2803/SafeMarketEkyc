@@ -52,7 +52,15 @@ export class OrdersService {
    */
   async createOrder(buyerId: number, dto: CreateOrderDto): Promise<Record<string, unknown>> {
     const buyer = await this.userRepo.findOne({ where: { userId: buyerId } });
-    if (!buyer || buyer.kycStatus !== 'Verified') {
+    if (!buyer) {
+      throw new NotFoundException('Người dùng không tồn tại');
+    }
+    if (buyer.isAdmin) {
+      throw new ForbiddenException(
+        'Tài khoản quản trị không được mua sản phẩm. Hãy dùng tài khoản người mua thường.',
+      );
+    }
+    if (buyer.kycStatus !== 'Verified') {
       throw new ForbiddenException(
         'Bạn cần xác thực danh tính (eKYC) trước khi mua hàng',
       );
@@ -297,6 +305,32 @@ export class OrdersService {
     return this.toOrderJson(orderId);
   }
 
+  /**
+   * Người bán xác nhận bán từ chat:
+   * - DIRECT → confirmHandover (Shipped) — sau đó buyer mới được nhận hàng
+   * - BANK_TRANSFER + SHIP → confirmPayment (Paid)
+   * - ONLINE_ESCROW: chỉ khi đã Paid (buyer đã thanh toán escrow)
+   */
+  async confirmSaleFromChat(orderId: number, sellerId: number) {
+    const order = await this.requireSeller(orderId, sellerId);
+    if (order.paymentMethod === 'ONLINE_ESCROW') {
+      if (order.orderStatus === 'Pending') {
+        throw new BadRequestException(
+          'Chờ người mua thanh toán online (escrow) trước khi xác nhận bán.',
+        );
+      }
+      if (order.deliveryMethod === 'DIRECT') {
+        return this.confirmHandover(orderId, sellerId);
+      }
+      // SHIP: đã Paid — chờ ship riêng; bước chat chỉ đánh dấu đã xác nhận.
+      return this.toOrderJson(orderId);
+    }
+    if (order.deliveryMethod === 'DIRECT') {
+      return this.confirmHandover(orderId, sellerId);
+    }
+    return this.confirmPayment(orderId, sellerId);
+  }
+
   async confirmPayment(orderId: number, userId: number) {
     const order = await this.requireSeller(orderId, userId);
     if (!['Pending', 'Paid'].includes(order.orderStatus)) {
@@ -341,20 +375,22 @@ export class OrdersService {
         'Chỉ người mua được xác nhận đã nhận hàng',
       );
     }
-    if (!proofUrl) {
+    if (!proofUrl || !String(proofUrl).trim()) {
       throw new BadRequestException(
-        'Vui lòng chụp ảnh xác nhận đã nhận hàng trước khi hoàn tất',
+        'Bắt buộc có ảnh xác nhận đã nhận hàng — đây là bước bắt buộc khi nhận hàng',
       );
     }
 
     // Bắt buộc người bán đã xác nhận giao (Shipped).
-    // Paid + DIRECT: tương thích đơn cũ (trước đây handover đặt Paid).
+    // Paid + CASH + DIRECT: đơn cũ (handover từng ghi Paid).
     const sellerDelivered =
       order.orderStatus === 'Shipped' ||
-      (order.orderStatus === 'Paid' && order.deliveryMethod === 'DIRECT');
+      (order.orderStatus === 'Paid' &&
+        order.deliveryMethod === 'DIRECT' &&
+        order.paymentMethod === 'CASH');
     if (!sellerDelivered) {
       throw new BadRequestException(
-        'Chờ người bán xác nhận đã giao hàng trước khi bạn xác nhận nhận hàng',
+        'Chờ người bán xác nhận đã bán/giao hàng trước khi bạn xác nhận nhận hàng',
       );
     }
 
@@ -442,8 +478,10 @@ export class OrdersService {
           : 'Không thể hủy đơn này',
       );
     }
+
+    const rawReason = (dto?.reason ?? 'Hủy đơn').trim() || 'Hủy đơn';
     order.orderStatus = 'Cancelled';
-    order.cancelReason = dto.reason ?? 'Hủy đơn';
+    order.cancelReason = rawReason.slice(0, 255);
     await this.orderRepo.save(order);
 
     const product = await this.productRepo.findOne({
@@ -454,12 +492,18 @@ export class OrdersService {
       await this.productRepo.save(product);
     }
 
-    const payment = await this.paymentRepo.findOne({ where: { orderId } });
-    if (payment?.paymentMethod === 'ONLINE_ESCROW') {
-      await this.paymentsService.refundEscrow(orderId);
-    } else if (payment) {
-      payment.escrowStatus = 'Refunded';
-      await this.paymentRepo.save(payment);
+    try {
+      const payment = await this.paymentRepo.findOne({ where: { orderId } });
+      if (payment?.paymentMethod === 'ONLINE_ESCROW') {
+        await this.paymentsService.refundEscrow(orderId);
+      } else if (payment) {
+        payment.escrowStatus = 'Refunded';
+        await this.paymentRepo.save(payment);
+      }
+    } catch (err) {
+      // Đơn đã Cancelled — không fail cả request vì hoàn tiền/ghi payment lỗi.
+      // eslint-disable-next-line no-console
+      console.error(`Cancel order #${orderId} payment cleanup failed`, err);
     }
 
     return this.toOrderJson(orderId);

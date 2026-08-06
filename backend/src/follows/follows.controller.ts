@@ -14,13 +14,13 @@ import { User } from '../entities/user.entity';
 import { FollowsService } from './follows.service';
 
 @ApiTags('follows')
-@ApiBearerAuth('JWT-auth')
-@UseGuards(AuthGuard('jwt'))
 @Controller('follows')
 export class FollowsController {
   constructor(private readonly followsService: FollowsService) {}
 
   @Post(':userId')
+  @ApiBearerAuth('JWT-auth')
+  @UseGuards(AuthGuard('jwt'))
   @ApiOperation({ summary: 'Theo dõi người bán/mua' })
   follow(
     @CurrentUser() user: User,
@@ -30,6 +30,8 @@ export class FollowsController {
   }
 
   @Delete(':userId')
+  @ApiBearerAuth('JWT-auth')
+  @UseGuards(AuthGuard('jwt'))
   @ApiOperation({ summary: 'Bỏ theo dõi' })
   unfollow(
     @CurrentUser() user: User,
@@ -39,6 +41,8 @@ export class FollowsController {
   }
 
   @Get(':userId/status')
+  @ApiBearerAuth('JWT-auth')
+  @UseGuards(AuthGuard('jwt'))
   @ApiOperation({ summary: 'Trạng thái theo dõi + số follower' })
   async status(
     @CurrentUser() user: User,
@@ -51,5 +55,17 @@ export class FollowsController {
       this.followsService.followingCount(userId),
     ]);
     return { following, followerCount, followingCount };
+  }
+
+  @Get(':userId/followers')
+  @ApiOperation({ summary: 'Danh sách người theo dõi user' })
+  listFollowers(@Param('userId', ParseIntPipe) userId: number) {
+    return this.followsService.listFollowers(userId);
+  }
+
+  @Get(':userId/following')
+  @ApiOperation({ summary: 'Danh sách user đang theo dõi' })
+  listFollowing(@Param('userId', ParseIntPipe) userId: number) {
+    return this.followsService.listFollowing(userId);
   }
 }

@@ -1,3 +1,5 @@
+import 'package:safemarket_app/services/auth_service.dart';
+
 class ChatThread {
   const ChatThread({
     required this.threadId,
@@ -88,6 +90,7 @@ class ChatThreadDetail {
     this.thumbnailUrl,
     this.orderId,
     this.orderStatus,
+    this.paymentMethod,
     required this.amBuyer,
     required this.amSeller,
   });
@@ -107,22 +110,54 @@ class ChatThreadDetail {
   final String? thumbnailUrl;
   final int? orderId;
   final String? orderStatus;
+  final String? paymentMethod;
   final bool amBuyer;
   final bool amSeller;
 
-  bool get canPurchaseInChat =>
-      amBuyer &&
-      productId != null &&
-      orderId == null &&
-      (productStatus == null || productStatus == 'Available');
+  bool get isOnlineEscrow => paymentMethod == 'ONLINE_ESCROW';
+
+  /// Còn đơn đang hiệu lực (chưa hủy).
+  bool get hasActiveOrder =>
+      orderId != null && orderStatus != 'Cancelled';
+
+  /// Đơn escrow còn Pending — người mua cần (lại) thanh toán online.
+  bool get needsBuyerOnlinePayment =>
+      isOnlineEscrow &&
+      hasActiveOrder &&
+      (orderStatus == null || orderStatus == 'Pending');
+
+  /// Người bán chỉ xác nhận sau khi escrow đã Paid (hoặc đơn không phải online).
+  bool get sellerCanConfirmPurchase {
+    if (!hasActiveOrder) return false;
+    if (!isOnlineEscrow) return true;
+    return orderStatus != null &&
+        orderStatus != 'Pending' &&
+        orderStatus != 'Cancelled';
+  }
+
+  /// Chỉ gắn đầu chat khi chưa có đơn đang chạy (đã mua thì gỡ strip).
+  bool get showProductStrip =>
+      productId != null && !hasActiveOrder;
+
+  bool get canPurchaseInChat {
+    final isAdmin = AuthService.instance.currentUser?.isAdmin == true;
+    return !isAdmin &&
+        amBuyer &&
+        productId != null &&
+        !hasActiveOrder &&
+        (productStatus == null || productStatus == 'Available');
+  }
 
   /// Người khác đã đặt (Reserved/Sold) hoặc mình không phải buyer.
   bool get productTakenByOther =>
       amBuyer &&
-      orderId == null &&
+      !hasActiveOrder &&
       (productStatus == 'Reserved' || productStatus == 'Sold');
 
   String get purchaseBlockedLabel {
+    if (AuthService.instance.currentUser?.isAdmin == true) {
+      return 'Admin không mua hàng';
+    }
     if (productStatus == 'Sold') return 'Đã bán';
     if (productStatus == 'Reserved') return 'Đã có người đặt';
     return 'Không thể đặt mua';
@@ -145,6 +180,7 @@ class ChatThreadDetail {
       thumbnailUrl: json['thumbnailUrl'] as String?,
       orderId: (json['orderId'] as num?)?.toInt(),
       orderStatus: json['orderStatus'] as String?,
+      paymentMethod: json['paymentMethod'] as String?,
       amBuyer: json['amBuyer'] as bool? ?? false,
       amSeller: json['amSeller'] as bool? ?? false,
     );
@@ -162,6 +198,35 @@ class ChatThreadDetail {
       orderId: t.orderId,
       amBuyer: myUserId == t.buyerId,
       amSeller: myUserId == t.sellerId,
+    );
+  }
+
+  ChatThreadDetail copyWith({
+    String? orderStatus,
+    String? paymentMethod,
+    int? orderId,
+    String? productStatus,
+    bool clearOrderId = false,
+  }) {
+    return ChatThreadDetail(
+      threadId: threadId,
+      buyerId: buyerId,
+      sellerId: sellerId,
+      sellerName: sellerName,
+      buyerName: buyerName,
+      productId: productId,
+      productTitle: productTitle,
+      productPrice: productPrice,
+      productPriceFormatted: productPriceFormatted,
+      conditionPct: conditionPct,
+      productStatus: productStatus ?? this.productStatus,
+      productLocation: productLocation,
+      thumbnailUrl: thumbnailUrl,
+      orderId: clearOrderId ? null : (orderId ?? this.orderId),
+      orderStatus: orderStatus ?? this.orderStatus,
+      paymentMethod: paymentMethod ?? this.paymentMethod,
+      amBuyer: amBuyer,
+      amSeller: amSeller,
     );
   }
 }
@@ -243,6 +308,8 @@ class ChatMessage {
   bool get isSaleConfirmed => messageType == 'SALE_CONFIRMED';
   bool get isPendingPurchase =>
       isPurchaseRequest && (meta['status'] as String? ?? 'pending') == 'pending';
+  bool get isCancelledPurchase =>
+      isPurchaseRequest && (meta['status'] as String?) == 'cancelled';
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     final rawMeta = json['meta'];

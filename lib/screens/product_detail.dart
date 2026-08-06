@@ -87,15 +87,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     if (!p.isPurchasable) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            p.isReserved
-                ? 'Sản phẩm đã có người đặt hàng. Bạn không thể đặt lại.'
-                : p.isSold
-                    ? 'Sản phẩm đã được bán'
-                    : 'Sản phẩm không còn khả dụng để mua',
-          ),
-        ),
+        SnackBar(content: Text(p.purchaseBlockedLabel)),
       );
       return;
     }
@@ -351,129 +343,139 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                             color: AppColors.sellerCardBg,
                             borderRadius: BorderRadius.circular(16),
                           ),
-                          child: Row(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Expanded(
-                                child: InkWell(
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute<void>(
-                                        builder: (_) => PublicProfileScreen(
-                                          userId: p.seller.userId,
-                                          displayNameHint:
-                                              p.seller.displayName ??
-                                                  p.seller.email,
-                                        ),
+                              InkWell(
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute<void>(
+                                      builder: (_) => PublicProfileScreen(
+                                        userId: p.seller.userId,
+                                        displayNameHint:
+                                            p.seller.displayName ??
+                                                p.seller.email,
                                       ),
-                                    );
-                                  },
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Row(
-                                    children: [
-                                      Stack(
-                                        clipBehavior: Clip.none,
-                                        children: [
-                                          CircleAvatar(
-                                            radius: 28,
-                                            backgroundColor:
-                                                const Color(0xFFBFDBFE),
-                                            child: Text(
-                                              initials,
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                color: AppColors.primary,
-                                              ),
+                                    ),
+                                  );
+                                },
+                                borderRadius: BorderRadius.circular(12),
+                                child: Row(
+                                  children: [
+                                    Stack(
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        CircleAvatar(
+                                          radius: 28,
+                                          backgroundColor:
+                                              const Color(0xFFBFDBFE),
+                                          child: Text(
+                                            initials,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: AppColors.primary,
                                             ),
                                           ),
-                                          if (p.seller.kycStatus == 'Verified')
-                                            const Positioned(
-                                              right: -2,
-                                              bottom: -2,
-                                              child: VerifiedBadge(size: 20),
+                                        ),
+                                        if (p.seller.kycStatus == 'Verified')
+                                          const Positioned(
+                                            right: -2,
+                                            bottom: -2,
+                                            child: VerifiedBadge(size: 20),
+                                          ),
+                                      ],
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            p.seller.displayName ??
+                                                p.seller.email,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 16,
                                             ),
-                                        ],
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              p.seller.displayName ??
-                                                  p.seller.email,
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.w700,
-                                                fontSize: 16,
-                                              ),
+                                          ),
+                                          Text(
+                                            p.seller.email,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              color: AppColors.textSecondary,
                                             ),
-                                            Text(
-                                              p.seller.email,
-                                              style: const TextStyle(
-                                                fontSize: 12,
-                                                color: AppColors.textSecondary,
-                                              ),
-                                            ),
-                                            if (p.seller.reviewCount > 0) ...[
-                                              const SizedBox(height: 6),
-                                              Row(
-                                                children: [
-                                                  StarRating(
-                                                    rating: p.seller
-                                                        .averageRating
-                                                        .round()
-                                                        .clamp(1, 5),
-                                                    size: 16,
-                                                  ),
-                                                  const SizedBox(width: 6),
-                                                  Text(
+                                          ),
+                                          if (p.seller.reviewCount > 0) ...[
+                                            const SizedBox(height: 6),
+                                            Row(
+                                              children: [
+                                                StarRating(
+                                                  rating: p.seller.averageRating
+                                                      .round()
+                                                      .clamp(1, 5),
+                                                  size: 16,
+                                                ),
+                                                const SizedBox(width: 6),
+                                                Flexible(
+                                                  child: Text(
                                                     '${p.seller.averageRating.toStringAsFixed(1)} (${p.seller.reviewCount})',
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
                                                     style: const TextStyle(
                                                       fontSize: 12,
-                                                      fontWeight: FontWeight.w600,
+                                                      fontWeight:
+                                                          FontWeight.w600,
                                                       color: AppColors
                                                           .textSecondary,
                                                     ),
                                                   ),
-                                                ],
-                                              ),
-                                            ],
+                                                ),
+                                              ],
+                                            ),
                                           ],
-                                        ),
+                                        ],
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                  ],
                                 ),
                               ),
                               if (AuthService.instance.currentUser?.userId !=
-                                  p.seller.userId)
-                                OutlinedButton.icon(
-                                  onPressed: _followLoading
-                                      ? null
-                                      : () => _toggleFollowSeller(
-                                            p.seller.userId,
-                                          ),
-                                  icon: Icon(
-                                    _followingSeller
-                                        ? Icons.check
-                                        : Icons.person_add_outlined,
-                                    size: 18,
-                                  ),
-                                  label: Text(
-                                    _followingSeller
-                                        ? 'Đang theo dõi'
-                                        : 'Theo dõi',
-                                    style: const TextStyle(fontSize: 12),
-                                  ),
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 6,
+                                  p.seller.userId) ...[
+                                const SizedBox(height: 12),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: OutlinedButton.icon(
+                                    onPressed: _followLoading
+                                        ? null
+                                        : () => _toggleFollowSeller(
+                                              p.seller.userId,
+                                            ),
+                                    icon: Icon(
+                                      _followingSeller
+                                          ? Icons.check
+                                          : Icons.person_add_outlined,
+                                      size: 18,
                                     ),
-                                    visualDensity: VisualDensity.compact,
+                                    label: Text(
+                                      _followingSeller
+                                          ? 'Đang theo dõi'
+                                          : 'Theo dõi',
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 10,
+                                      ),
+                                    ),
                                   ),
                                 ),
+                              ],
                             ],
                           ),
                         ),

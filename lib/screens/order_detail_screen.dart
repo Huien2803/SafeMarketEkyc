@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:safemarket_app/core/constants/app_decorations.dart';
@@ -23,14 +25,29 @@ class OrderDetailScreen extends StatefulWidget {
   State<OrderDetailScreen> createState() => _OrderDetailScreenState();
 }
 
-class _OrderDetailScreenState extends State<OrderDetailScreen> {
+class _OrderDetailScreenState extends State<OrderDetailScreen>
+    with WidgetsBindingObserver {
   late Future<OrderItem> _future;
   bool _busy = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _reload();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _reload();
+    }
   }
 
   void _reload() => setState(() {
@@ -86,54 +103,29 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         comment: result.comment,
       );
       if (mounted) {
-        final bonus = result.rating == 5 && reviewingSeller
-            ? ' Người bán được +30 điểm tin cậy.'
-            : '';
+        final who = reviewingSeller ? 'Người bán' : 'Người mua';
+        final impact = switch (result.rating) {
+          5 => ' $who được +30 điểm tín nhiệm.',
+          3 => ' $who bị −10 điểm tín nhiệm.',
+          2 => ' $who bị −20 điểm tín nhiệm.',
+          1 => ' $who bị −30 điểm tín nhiệm.',
+          _ => '', // 4 sao: không đổi điểm
+        };
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Cảm ơn bạn đã đánh giá!$bonus')),
+          SnackBar(content: Text('Cảm ơn bạn đã đánh giá!$impact')),
         );
       }
     });
   }
 
-  /// Người mua xác nhận đã nhận hàng: bắt buộc chụp/chọn ảnh bằng chứng.
+  /// Người mua xác nhận đã nhận hàng: bắt buộc chụp ảnh rồi mới gửi xác nhận.
   Future<void> _confirmReceivedWithProof(OrderItem o) async {
     if (_busy) return;
-    final source = await showModalBottomSheet<ImageSource>(
+    final image = await showModalBottomSheet<XFile>(
       context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'Chụp ảnh xác nhận đã nhận hàng',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.camera_alt_outlined),
-              title: const Text('Chụp ảnh'),
-              onTap: () => Navigator.pop(ctx, ImageSource.camera),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Chọn từ thư viện'),
-              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-    if (source == null || !mounted) return;
-
-    final picker = ImagePicker();
-    final XFile? image = await picker.pickImage(
-      source: source,
-      imageQuality: 70,
-      maxWidth: 1600,
+      isScrollControlled: true,
+      isDismissible: true,
+      builder: (ctx) => const _ReceiptProofSheet(),
     );
     if (image == null || !mounted) return;
 
@@ -143,7 +135,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Đã xác nhận nhận hàng. Người bán đã được thông báo.',
+              'Đã xác nhận nhận hàng kèm ảnh. Người bán đã được thông báo.',
             ),
           ),
         );
@@ -176,6 +168,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   /// Hủy đơn: xác nhận + cho nhập lý do. Cảnh báo hoàn tiền/trừ điểm nếu đã trả.
   Future<void> _cancelOrder(OrderItem o) async {
+    if (_busy) return;
     final reasonCtrl = TextEditingController();
     final paid = o.orderStatus == 'Paid' || o.orderStatus == 'Shipped';
     final holdingEscrow = o.isOnlineEscrow && o.escrowStatus == 'Holding';
@@ -192,7 +185,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   ? 'Tiền escrow đang tạm giữ sẽ được hoàn lại cho người mua.'
                   : paid
                       ? 'Đơn đã thanh toán — hủy lúc này có thể bị trừ điểm tín nhiệm.'
-                      : 'Bạn có chắc muốn hủy đơn hàng này?',
+                      : 'Bạn có chắc muốn hủy đơn hàng này? '
+                          'Thao tác này không mở cổng thanh toán.',
               style: const TextStyle(fontSize: 13, height: 1.4),
             ),
             const SizedBox(height: 12),
@@ -210,12 +204,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Không hủy'),
+            child: const Text('Giữ đơn'),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Hủy đơn'),
+            child: const Text('Xác nhận hủy'),
           ),
         ],
       ),
@@ -224,11 +218,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     reasonCtrl.dispose();
     if (confirmed != true || !mounted) return;
 
-    await _run(() async {
+    // Khóa mọi nút NGAY (tránh tap xuyên dialog trúng "Thanh toán online").
+    setState(() => _busy = true);
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    if (!mounted) return;
+
+    try {
       await OrderService.instance.cancelOrder(
         o.orderId,
         reason: reason.isNotEmpty ? reason : 'Người dùng hủy đơn',
       );
+      await ChatService.instance.releaseCancelledOrder(o.orderId);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -239,24 +239,81 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             ),
           ),
         );
+        _reload();
       }
-    });
+    } catch (e) {
+      if (mounted) {
+        final raw = '$e';
+        final msg = raw
+            .replaceFirst(RegExp(r'^Exception:\s*'), '')
+            .replaceFirst(RegExp(r'^AuthException\(\d+\):\s*'), '');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg)),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _payOnlineEscrow(OrderItem o) async {
-    await _run(() async {
+    if (_busy) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Thanh toán online'),
+        content: const Text(
+          'Bạn sẽ thanh toán escrow qua VNPay (hoặc demo nếu chưa cấu hình). '
+          'Tiền được tạm giữ đến khi giao dịch hoàn tất.\n\n'
+          'Nếu chỉ muốn hủy đơn, hãy đóng hộp thoại này và bấm «Hủy đơn hàng».',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Đóng'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.trustGreen),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Tiếp tục thanh toán'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    setState(() => _busy = true);
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    if (!mounted) return;
+
+    try {
       final msg = await PaymentService.instance.payOrder(o.orderId);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               msg ??
-                  'Hoàn tất thanh toán trên VNPay rồi quay lại app và làm mới đơn.',
+                  'Mở cổng thanh toán. Nếu thoát giữa chừng, quay lại màn này '
+                  'và bấm "Thanh toán online" lần nữa.',
             ),
+            duration: const Duration(seconds: 5),
           ),
         );
+        _reload();
       }
-    });
+    } catch (e) {
+      if (mounted) {
+        final raw = '$e';
+        final msg = raw
+            .replaceFirst(RegExp(r'^Exception:\s*'), '')
+            .replaceFirst(RegExp(r'^AuthException\(\d+\):\s*'), '');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg)),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -267,8 +324,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       _reload();
     } catch (e) {
       if (mounted) {
+        final raw = '$e';
+        final msg = raw
+            .replaceFirst(RegExp(r'^Exception:\s*'), '')
+            .replaceFirst(RegExp(r'^AuthException\(\d+\):\s*'), '');
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e')),
+          SnackBar(content: Text(msg)),
         );
       }
     } finally {
@@ -417,12 +478,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                         const SizedBox(height: 8),
                         Text(
                           o.isDirectDelivery
-                              ? '1. Người mua thanh toán online → tiền tạm giữ tại app\n'
-                                  '2. Hẹn gặp giao hàng → người bán xác nhận\n'
-                                  '3. Người mua chụp ảnh xác nhận → tiền giải ngân cho người bán'
+                              ? '1. Người mua thanh toán online → tiền tạm giữ\n'
+                                  '2. Người bán bấm «Xác nhận bán cho khách» (chat)\n'
+                                  '3. Người mua nhận hàng → chụp ảnh xác nhận\n'
+                                  '4. Hệ thống giải ngân cho người bán'
                               : '1. Người mua thanh toán online → tiền tạm giữ\n'
-                                  '2. Người bán giao ship\n'
-                                  '3. Người mua xác nhận nhận hàng → giải ngân',
+                                  '2. Người bán bấm «Xác nhận bán» rồi giao ship\n'
+                                  '3. Người mua nhận hàng → chụp ảnh xác nhận\n'
+                                  '4. Hệ thống giải ngân cho người bán',
                           style: const TextStyle(fontSize: 13, height: 1.45),
                         ),
                       ],
@@ -513,6 +576,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : () => _cancelOrder(o),
+                    icon: const Icon(Icons.cancel_outlined),
+                    label: const Text('Hủy đơn (chưa thanh toán)'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.danger,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                 ],
                 if (_isSeller(o) &&
                     o.isOnlineEscrow &&
@@ -567,6 +639,24 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       backgroundColor: AppColors.trustGreen,
                     ),
                   ),
+                if (_isBuyer(o) &&
+                    o.isOnlineEscrow &&
+                    o.isDirectDelivery &&
+                    o.orderStatus == 'Paid')
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text(
+                      'Bạn đã thanh toán escrow. '
+                      'Chờ người bán bấm «Xác nhận bán / đã giao» trong chat '
+                      'rồi bạn mới được chụp ảnh xác nhận nhận hàng.',
+                      style: TextStyle(fontSize: 13, height: 1.45),
+                    ),
+                  ),
                 if (_isBuyer(o) && o.buyerCanConfirmReceived) ...[
                   Container(
                     padding: const EdgeInsets.all(12),
@@ -582,8 +672,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                         SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Cần chụp ảnh sản phẩm khi nhận để xác nhận. '
-                            'Ảnh sẽ gửi cho người bán làm bằng chứng.',
+                            'Bắt buộc: chụp ảnh sản phẩm khi nhận hàng, '
+                            'rồi bấm xác nhận. Không có ảnh thì không hoàn tất đơn '
+                            'và escrow chưa giải ngân.',
                             style: TextStyle(fontSize: 12, height: 1.4),
                           ),
                         ),
@@ -663,7 +754,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 if (o.orderStatus != 'Completed' &&
                     o.orderStatus != 'Cancelled' &&
                     o.orderStatus != 'Disputed' &&
-                    (_isBuyer(o) || _isSeller(o))) ...[
+                    (_isBuyer(o) || _isSeller(o)) &&
+                    // Buyer chưa trả escrow: đã có nút hủy ngay dưới nút thanh toán.
+                    !(o.needsOnlinePayment && _isBuyer(o))) ...[
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
                     onPressed: _busy ? null : () => _cancelOrder(o),
@@ -735,10 +828,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 const SizedBox(height: 8),
                 const Text(
                   '• eKYC xong: +50 điểm (người mua & người bán)\n'
-                  '• Giao dịch hoàn tất: +15 (mua), +20 (bán)\n'
-                  '• Người mua không nhận hàng: người bán -80\n'
-                  '• Giao hàng sai: người bán -60\n'
-                  '• Hủy đơn sau thanh toán: -30 điểm',
+                  '• Giao dịch hoàn tất: +20 điểm mỗi bên\n'
+                  '• Đánh giá 5★: +30 | 4★: không đổi\n'
+                  '• Đánh giá 3★: −10 | 2★: −20 | 1★: −30\n'
+                  '• Người mua không nhận hàng: người bán −80\n'
+                  '• Giao hàng sai: người bán −60\n'
+                  '• Hủy đơn sau thanh toán: −30 điểm',
                   style: TextStyle(
                     fontSize: 13,
                     color: AppColors.textSecondary,
@@ -784,6 +879,156 @@ class _InfoRow extends StatelessWidget {
                 fontWeight: FontWeight.w600,
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Sheet bắt buộc: chọn/chụp ảnh → xem trước → mới được xác nhận nhận hàng.
+class _ReceiptProofSheet extends StatefulWidget {
+  const _ReceiptProofSheet();
+
+  @override
+  State<_ReceiptProofSheet> createState() => _ReceiptProofSheetState();
+}
+
+class _ReceiptProofSheetState extends State<_ReceiptProofSheet> {
+  final _picker = ImagePicker();
+  XFile? _image;
+  Uint8List? _previewBytes;
+  bool _picking = false;
+
+  Future<void> _pick(ImageSource source) async {
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      final file = await _picker.pickImage(
+        source: source,
+        imageQuality: 70,
+        maxWidth: 1600,
+      );
+      if (file == null || !mounted) return;
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Ảnh không hợp lệ — vui lòng chụp lại')),
+          );
+        }
+        return;
+      }
+      setState(() {
+        _image = file;
+        _previewBytes = bytes;
+      });
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.paddingOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 16,
+        bottom: bottom + 16,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Xác nhận đã nhận hàng',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Bước bắt buộc: phải có ảnh bằng chứng khi nhận hàng '
+            'trước khi hoàn tất đơn.',
+            style: TextStyle(
+              fontSize: 13,
+              color: AppColors.textSecondary,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (_previewBytes != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.memory(
+                _previewBytes!,
+                height: 220,
+                fit: BoxFit.cover,
+              ),
+            )
+          else
+            Container(
+              height: 160,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppColors.primary.withValues(alpha: 0.25),
+                ),
+              ),
+              child: const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.add_a_photo_outlined,
+                      size: 40, color: AppColors.primary),
+                  SizedBox(height: 8),
+                  Text(
+                    'Chưa có ảnh — chưa thể xác nhận',
+                    style: TextStyle(color: AppColors.textMuted),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _picking ? null : () => _pick(ImageSource.camera),
+                  icon: const Icon(Icons.photo_camera_outlined),
+                  label: Text(_image == null ? 'Chụp ảnh' : 'Chụp lại'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _picking ? null : () => _pick(ImageSource.gallery),
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: const Text('Thư viện'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: (_image == null || _picking)
+                ? null
+                : () => Navigator.pop(context, _image),
+            icon: const Icon(Icons.check_circle_outline),
+            label: Text(
+              _image == null
+                  ? 'Chụp ảnh trước để xác nhận'
+                  : 'Xác nhận đã nhận hàng',
+            ),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.trustGreen,
+              minimumSize: const Size.fromHeight(48),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Đóng'),
           ),
         ],
       ),
