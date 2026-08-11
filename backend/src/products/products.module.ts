@@ -8,6 +8,10 @@ import { ProductImage } from '../entities/product-image.entity';
 import { Score } from '../entities/score.entity';
 import { Review } from '../entities/review.entity';
 import { User } from '../entities/user.entity';
+import { Order } from '../entities/order.entity';
+import { Payment } from '../entities/payment.entity';
+import { Report } from '../entities/report.entity';
+import { ChatThread } from '../entities/chat-thread.entity';
 import { CategoriesService } from './categories.service';
 import { ProductsService } from './products.service';
 import { ProductsController } from './products.controller';
@@ -21,6 +25,10 @@ import { ProductsController } from './products.controller';
       Score,
       Review,
       User,
+      Order,
+      Payment,
+      Report,
+      ChatThread,
     ]),
     AuthModule,
     NotificationsModule,

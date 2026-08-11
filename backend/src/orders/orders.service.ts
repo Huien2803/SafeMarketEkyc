@@ -168,6 +168,9 @@ export class OrdersService {
             }),
           );
         }
+      } else {
+        // ONLINE_ESCROW / CASH: xóa payment cũ (vd. Refunded sau hủy) để buyer trả lại sạch.
+        await manager.delete(Payment, { orderId: saved.orderId });
       }
 
       return saved.orderId;

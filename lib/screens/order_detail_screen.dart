@@ -337,6 +337,24 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     }
   }
 
+  /// Một lần xác nhận seller → API + đồng bộ thẻ chat (không cần bấm lại trong chat).
+  Future<void> _sellerConfirmAndSyncChat({
+    required Future<OrderItem> Function() action,
+  }) {
+    return _run(() async {
+      final updated = await action();
+      await ChatService.instance.syncSellerConfirmFromOrder(updated);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Đã xác nhận — thẻ chat cũng được cập nhật'),
+            backgroundColor: AppColors.trustGreen,
+          ),
+        );
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -567,6 +585,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   const SizedBox(height: 8),
                 ],
                 if (_isBuyer(o) && o.needsOnlinePayment) ...[
+                  if (o.escrowStatus == 'Refunded') ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 8),
+                      decoration: BoxDecoration(
+                        color: AppColors.warningBg,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Text(
+                        'Lần thanh toán trước đã hoàn / hủy. '
+                        'Bấm «Thanh toán online» để trả lại cho đơn này.',
+                        style: TextStyle(fontSize: 13, height: 1.45),
+                      ),
+                    ),
+                  ],
                   FilledButton.icon(
                     onPressed: _busy ? null : () => _payOnlineEscrow(o),
                     icon: const Icon(Icons.payment_outlined),
@@ -589,25 +622,35 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                 if (_isSeller(o) &&
                     o.isOnlineEscrow &&
                     o.isDirectDelivery &&
-                    o.orderStatus == 'Paid')
+                    o.orderStatus == 'Paid') ...[
                   FilledButton.icon(
                     onPressed: _busy
                         ? null
-                        : () => _run(() async {
-                              await OrderService.instance
-                                  .markDirectHandover(o.orderId);
-                            }),
+                        : () => _sellerConfirmAndSyncChat(
+                              action: () => OrderService.instance
+                                  .markDirectHandover(o.orderId),
+                            ),
                     icon: const Icon(Icons.handshake_outlined),
-                    label: const Text('Xác nhận đã giao hàng trực tiếp'),
+                    label: const Text('Xác nhận bán / đã giao cho khách'),
                   ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Chỉ cần bấm một lần (ở đây hoặc trong chat — cùng một bước).',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textMuted,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
                 if (_isSeller(o) && o.isShipOrder && o.orderStatus == 'Pending' && !o.isOnlineEscrow)
                   FilledButton.icon(
                     onPressed: _busy
                         ? null
-                        : () => _run(() async {
-                              await OrderService.instance
-                                  .markPaymentReceived(o.orderId);
-                            }),
+                        : () => _sellerConfirmAndSyncChat(
+                              action: () => OrderService.instance
+                                  .markPaymentReceived(o.orderId),
+                            ),
                     icon: const Icon(Icons.account_balance_outlined),
                     label: const Text('Đã nhận chuyển khoản'),
                   ),
@@ -618,9 +661,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   FilledButton.icon(
                     onPressed: _busy
                         ? null
-                        : () => _run(() async {
-                              await OrderService.instance.markShipped(o.orderId);
-                            }),
+                        : () => _sellerConfirmAndSyncChat(
+                              action: () =>
+                                  OrderService.instance.markShipped(o.orderId),
+                            ),
                     icon: const Icon(Icons.local_shipping_outlined),
                     label: const Text('Xác nhận đã giao ship'),
                   ),
@@ -629,10 +673,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   FilledButton.icon(
                     onPressed: _busy
                         ? null
-                        : () => _run(() async {
-                              await OrderService.instance
-                                  .markDirectHandover(o.orderId);
-                            }),
+                        : () => _sellerConfirmAndSyncChat(
+                              action: () => OrderService.instance
+                                  .markDirectHandover(o.orderId),
+                            ),
                     icon: const Icon(Icons.handshake_outlined),
                     label: const Text('Xác nhận đã giao & nhận tiền mặt'),
                     style: FilledButton.styleFrom(

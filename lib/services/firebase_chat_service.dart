@@ -375,6 +375,7 @@ class FirebaseChatService {
     required String threadId,
     required String messageId,
     required int orderId,
+    String orderStatus = 'Shipped',
   }) async {
     final user = AuthService.instance.currentUser;
     if (user == null) throw Exception('Cần đăng nhập');
@@ -399,7 +400,7 @@ class FirebaseChatService {
 
     await _root.child('threads').child(threadId).update({
       'orderId': orderId,
-      'orderStatus': 'Paid',
+      'orderStatus': orderStatus,
       'updatedAt': now,
     });
 
@@ -407,6 +408,53 @@ class FirebaseChatService {
       threadId,
       'Đã xác nhận bán',
       now,
+      orderId: orderId,
+      senderId: user.userId,
+    );
+  }
+
+  /// Khi seller xác nhận từ màn đơn (không qua nút chat) — cập nhật mọi thẻ PURCHASE_REQUEST.
+  Future<void> confirmPurchaseRequestsForOrder({
+    required String threadId,
+    required int orderId,
+    required String orderStatus,
+  }) async {
+    final user = AuthService.instance.currentUser;
+    if (user == null) return;
+
+    final snap = await _root.child('messages').child(threadId).get();
+    if (snap.exists && snap.value != null) {
+      final raw = Map<dynamic, dynamic>.from(snap.value as Map);
+      for (final entry in raw.entries) {
+        final data = Map<dynamic, dynamic>.from(entry.value as Map);
+        if (data['messageType'] != 'PURCHASE_REQUEST') continue;
+        final meta = data['meta'] is Map
+            ? Map<String, dynamic>.from(data['meta'] as Map)
+            : <String, dynamic>{};
+        final metaOrderId = (meta['orderId'] as num?)?.toInt();
+        if (metaOrderId != orderId) continue;
+        meta['status'] = 'confirmed';
+        await _root
+            .child('messages')
+            .child(threadId)
+            .child(entry.key.toString())
+            .update({
+          'messageType': 'SALE_CONFIRMED',
+          'body': 'Đã xác nhận bán',
+          'meta': meta,
+        });
+      }
+    }
+
+    await syncThreadOrderStatus(
+      threadId: threadId,
+      orderId: orderId,
+      orderStatus: orderStatus,
+    );
+    await _touchThread(
+      threadId,
+      'Đã xác nhận bán',
+      DateTime.now().millisecondsSinceEpoch,
       orderId: orderId,
       senderId: user.userId,
     );

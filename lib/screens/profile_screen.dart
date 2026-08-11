@@ -12,9 +12,11 @@ import 'package:safemarket_app/screens/order_detail_screen.dart';
 import 'package:safemarket_app/screens/edit_profile_screen.dart';
 import 'package:safemarket_app/screens/seller_reviews_screen.dart';
 import 'package:safemarket_app/screens/product_detail.dart';
+import 'package:safemarket_app/screens/post_product_screen.dart';
 import 'package:safemarket_app/screens/wallet_screen.dart';
 import 'package:safemarket_app/screens/follow_list_screen.dart';
 import 'package:safemarket_app/services/order_service.dart';
+import 'package:safemarket_app/services/product_service.dart';
 import 'package:safemarket_app/services/user_service.dart';
 import 'package:safemarket_app/widgets/product_status_badge.dart';
 import 'package:safemarket_app/widgets/product_thumbnail.dart';
@@ -446,6 +448,68 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       (s) => _SellerListingTile(
                                         item: s,
                                         showSoldBadge: false,
+                                        onChanged: _refresh,
+                                      ),
+                                    )
+                                    .toList(),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 24),
+                          // --- ĐÃ ẨN ---
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              FutureBuilder<List<SoldListing>>(
+                                future: _soldFuture,
+                                builder: (context, soldSnap) {
+                                  final hidden = (soldSnap.data ?? [])
+                                      .where((s) => s.isHidden)
+                                      .length;
+                                  return Text(
+                                    'ĐÃ ẨN ($hidden)',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.textPrimary,
+                                    ),
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          FutureBuilder<List<SoldListing>>(
+                            future: _soldFuture,
+                            builder: (context, soldSnap) {
+                              if (soldSnap.connectionState ==
+                                  ConnectionState.waiting) {
+                                return const SizedBox.shrink();
+                              }
+                              final hiddenItems = (soldSnap.data ?? [])
+                                  .where((s) => s.isHidden)
+                                  .toList();
+                              if (hiddenItems.isEmpty) {
+                                return Container(
+                                  padding: const EdgeInsets.all(20),
+                                  decoration: AppDecorations.card(),
+                                  child: const Center(
+                                    child: Text(
+                                      'Không có tin đang ẩn',
+                                      style: TextStyle(
+                                        color: AppColors.textMuted,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }
+                              return Column(
+                                children: hiddenItems
+                                    .map(
+                                      (s) => _SellerListingTile(
+                                        item: s,
+                                        showSoldBadge: false,
+                                        onChanged: _refresh,
                                       ),
                                     )
                                     .toList(),
@@ -505,6 +569,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       (s) => _SellerListingTile(
                                         item: s,
                                         showSoldBadge: true,
+                                        onChanged: _refresh,
                                       ),
                                     )
                                     .toList(),
@@ -819,10 +884,12 @@ class _SellerListingTile extends StatelessWidget {
   const _SellerListingTile({
     required this.item,
     required this.showSoldBadge,
+    this.onChanged,
   });
 
   final SoldListing item;
   final bool showSoldBadge;
+  final VoidCallback? onChanged;
 
   void _openProduct(BuildContext context) {
     Navigator.push(
@@ -833,9 +900,97 @@ class _SellerListingTile extends StatelessWidget {
     );
   }
 
+  Future<void> _edit(BuildContext context) async {
+    final ok = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute<bool>(
+        builder: (_) => PostProductScreen(editProductId: item.productId),
+      ),
+    );
+    if (ok == true) onChanged?.call();
+  }
+
+  Future<void> _hide(BuildContext context) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Ẩn tin đăng?'),
+        content: const Text(
+          'Tin sẽ không hiện trên chợ. Bạn có thể hiện lại bất cứ lúc nào.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Hủy')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Ẩn tin')),
+        ],
+      ),
+    );
+    if (confirm != true || !context.mounted) return;
+    try {
+      await ProductService.instance.hideProduct(item.productId);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Đã ẩn tin đăng')),
+      );
+      onChanged?.call();
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
+  Future<void> _unhide(BuildContext context) async {
+    try {
+      await ProductService.instance.unhideProduct(item.productId);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Đã hiện lại tin trên chợ')),
+      );
+      onChanged?.call();
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
+  Future<void> _delete(BuildContext context) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Xóa tin đăng?'),
+        content: const Text(
+          'Thao tác không hoàn tác. Ảnh và tin sẽ bị xóa khỏi hệ thống.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Hủy')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Xóa'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !context.mounted) return;
+    try {
+      await ProductService.instance.deleteProduct(item.productId);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Đã xóa tin đăng')),
+      );
+      onChanged?.call();
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasBuyer = item.hasBuyer;
+    final manageable = item.isManageable;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: AppDecorations.card(),
@@ -859,16 +1014,16 @@ class _SellerListingTile extends StatelessWidget {
                         borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-                    if (showSoldBadge)
+                    if (showSoldBadge || item.isHidden)
                       Positioned(
                         top: 4,
                         left: 4,
                         child: ProductStatusBadge(
-                          status: 'Sold',
+                          status: item.isHidden ? 'Hidden' : 'Sold',
                           compact: true,
                         ),
                       ),
-                    if (showSoldBadge)
+                    if (showSoldBadge || item.isHidden)
                       Positioned.fill(
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(10),
@@ -905,7 +1060,9 @@ class _SellerListingTile extends StatelessWidget {
                           ? (item.buyerName != null
                               ? 'Đã bán cho ${item.buyerName}'
                               : 'Đã bán')
-                          : item.buyerStatusLabel,
+                          : item.isHidden
+                              ? 'Đã ẩn — không hiện trên chợ'
+                              : item.buyerStatusLabel,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -916,7 +1073,63 @@ class _SellerListingTile extends StatelessWidget {
                   ],
                 ),
               ),
-              if (hasBuyer && item.orderId != null)
+              if (manageable)
+                PopupMenuButton<String>(
+                  tooltip: 'Quản lý tin',
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'edit':
+                        _edit(context);
+                      case 'hide':
+                        _hide(context);
+                      case 'unhide':
+                        _unhide(context);
+                      case 'delete':
+                        _delete(context);
+                    }
+                  },
+                  itemBuilder: (ctx) => [
+                    const PopupMenuItem(
+                      value: 'edit',
+                      child: ListTile(
+                        dense: true,
+                        leading: Icon(Icons.edit_outlined),
+                        title: Text('Sửa tin'),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
+                    if (item.productStatus == 'Available')
+                      const PopupMenuItem(
+                        value: 'hide',
+                        child: ListTile(
+                          dense: true,
+                          leading: Icon(Icons.visibility_off_outlined),
+                          title: Text('Ẩn tin'),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                    if (item.isHidden)
+                      const PopupMenuItem(
+                        value: 'unhide',
+                        child: ListTile(
+                          dense: true,
+                          leading: Icon(Icons.visibility_outlined),
+                          title: Text('Hiện lại'),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: ListTile(
+                        dense: true,
+                        leading: Icon(Icons.delete_outline, color: Colors.red),
+                        title: Text('Xóa tin', style: TextStyle(color: Colors.red)),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
+                  ],
+                )
+              else if (hasBuyer && item.orderId != null)
                 IconButton(
                   tooltip: 'Chi tiết đơn',
                   icon: const Icon(Icons.receipt_long_outlined),

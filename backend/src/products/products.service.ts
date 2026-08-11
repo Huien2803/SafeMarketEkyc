@@ -1,15 +1,20 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Product } from '../entities/product.entity';
 import { ProductImage } from '../entities/product-image.entity';
 import { Score } from '../entities/score.entity';
 import { Review } from '../entities/review.entity';
 import { User } from '../entities/user.entity';
+import { Order } from '../entities/order.entity';
+import { Payment } from '../entities/payment.entity';
+import { Report } from '../entities/report.entity';
+import { ChatThread } from '../entities/chat-thread.entity';
 import { CategoriesService } from './categories.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { ProductQueryDto, ProductSort } from './dto/product-query.dto';
@@ -30,6 +35,9 @@ export class ProductsService {
     private readonly reviewRepo: Repository<Review>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    @InjectRepository(Order)
+    private readonly orderRepo: Repository<Order>,
+    private readonly dataSource: DataSource,
     private readonly categoriesService: CategoriesService,
     private readonly notificationsService: NotificationsService,
   ) {}
@@ -193,6 +201,14 @@ export class ProductsService {
     patch: Partial<CreateProductDto>,
   ): Promise<void> {
     const product = await this.requireSellerProduct(productId, sellerId);
+    if (product.status === 'Sold') {
+      throw new BadRequestException('Không thể sửa tin đã bán');
+    }
+    if (product.status === 'Reserved') {
+      throw new BadRequestException(
+        'Tin đang có người đặt — không thể sửa. Hãy hủy đơn hoặc hoàn tất giao dịch trước.',
+      );
+    }
     if (patch.title != null) product.title = patch.title;
     if (patch.description != null) product.description = patch.description;
     if (patch.price != null) product.price = patch.price;
@@ -207,14 +223,89 @@ export class ProductsService {
 
   async hideProduct(productId: number, sellerId: number): Promise<void> {
     const product = await this.requireSellerProduct(productId, sellerId);
+    if (product.status !== 'Available') {
+      throw new BadRequestException(
+        'Chỉ ẩn được tin đang Available (chưa có người đặt / chưa bán).',
+      );
+    }
     product.status = 'Hidden';
     await this.productRepo.save(product);
   }
 
-  async deleteProduct(productId: number, sellerId: number): Promise<void> {
+  /** Hiện lại tin đã ẩn → Available. */
+  async unhideProduct(productId: number, sellerId: number): Promise<void> {
     const product = await this.requireSellerProduct(productId, sellerId);
-    await this.imageRepo.delete({ productId });
-    await this.productRepo.remove(product);
+    if (product.status !== 'Hidden') {
+      throw new BadRequestException('Chỉ hiện lại được tin đang ở trạng thái Hidden');
+    }
+    product.status = 'Available';
+    await this.productRepo.save(product);
+  }
+
+  async deleteProduct(productId: number, sellerId: number): Promise<{ message: string }> {
+    const product = await this.requireSellerProduct(productId, sellerId);
+    if (product.status === 'Sold') {
+      throw new BadRequestException('Không thể xóa tin đã bán (giữ lịch sử)');
+    }
+    if (product.status === 'Reserved') {
+      throw new BadRequestException(
+        'Tin đang có người đặt — không thể xóa. Hãy xử lý đơn trước.',
+      );
+    }
+
+    const linkedOrder = await this.orderRepo.findOne({
+      where: { productId },
+    });
+    if (linkedOrder && linkedOrder.orderStatus !== 'Cancelled') {
+      throw new BadRequestException(
+        'Còn đơn hàng liên quan tới tin này. Hãy hủy đơn (hoặc hoàn tất) trước khi xóa.',
+      );
+    }
+
+    try {
+      await this.dataSource.transaction(async (manager) => {
+        if (linkedOrder) {
+          const orderId = Number(linkedOrder.orderId);
+          await manager.delete(Review, { orderId });
+          await manager.delete(Payment, { orderId });
+          await manager
+            .createQueryBuilder()
+            .update(ChatThread)
+            .set({ orderId: null, productId: null })
+            .where('order_id = :orderId OR product_id = :productId', {
+              orderId,
+              productId,
+            })
+            .execute();
+          await manager.delete(Order, { orderId });
+        } else {
+          await manager
+            .createQueryBuilder()
+            .update(ChatThread)
+            .set({ productId: null })
+            .where('product_id = :productId', { productId })
+            .execute();
+        }
+
+        await manager
+          .createQueryBuilder()
+          .update(Report)
+          .set({ productId: null })
+          .where('product_id = :productId', { productId })
+          .execute();
+
+        await manager.delete(ProductImage, { productId });
+        await manager.delete(Product, { productId });
+      });
+    } catch (err) {
+      if (err instanceof BadRequestException) throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new BadRequestException(
+        `Không xóa được tin (còn dữ liệu liên quan): ${msg}`,
+      );
+    }
+
+    return { message: 'Đã xóa tin đăng' };
   }
 
   private async requireSellerProduct(

@@ -64,8 +64,12 @@ class OrderItem {
 
   bool get isOnlineEscrow => paymentMethod == 'ONLINE_ESCROW';
 
+  /// Cần thanh toán online: đơn Pending + ONLINE_ESCROW và chưa Holding/Released.
+  /// Cho phép lại khi Payment cũ là Refunded (đơn tái dùng sau hủy).
   bool get needsOnlinePayment =>
-      isOnlineEscrow && orderStatus == 'Pending' && escrowStatus == null;
+      isOnlineEscrow &&
+      orderStatus == 'Pending' &&
+      (escrowStatus == null || escrowStatus == 'Refunded');
 
   bool get isCompleted => orderStatus == 'Completed';
 

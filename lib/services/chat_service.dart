@@ -76,6 +76,21 @@ class ChatService {
               : detail.productStatus,
         );
       }
+      // Đã xác nhận giao ở màn đơn → tự cập nhật thẻ chat (không còn nút xác nhận thừa).
+      if (order.orderStatus == 'Shipped' || order.orderStatus == 'Completed') {
+        await _firebase.confirmPurchaseRequestsForOrder(
+          threadId: threadId,
+          orderId: order.orderId,
+          orderStatus: order.orderStatus,
+        );
+      } else {
+        await _firebase.syncThreadOrderStatus(
+          threadId: threadId,
+          orderId: order.orderId,
+          orderStatus: order.orderStatus,
+          paymentMethod: order.paymentMethod,
+        );
+      }
       return detail.copyWith(
         orderStatus: order.orderStatus,
         paymentMethod: order.paymentMethod,
@@ -259,6 +274,23 @@ class ChatService {
       threadId: threadId,
       messageId: messageId,
       orderId: orderId,
+      orderStatus: (await OrderService.instance.getOrder(orderId)).orderStatus,
+    );
+  }
+
+  /// Sau khi seller xác nhận trên màn Chi tiết đơn — đồng bộ thẻ chat (một lần xác nhận).
+  Future<void> syncSellerConfirmFromOrder(OrderItem order) async {
+    final me = AuthService.instance.currentUser;
+    if (me == null) return;
+    final threadId = _firebase.threadKey(
+      order.buyerId,
+      order.sellerId,
+      order.productId,
+    );
+    await _firebase.confirmPurchaseRequestsForOrder(
+      threadId: threadId,
+      orderId: order.orderId,
+      orderStatus: order.orderStatus,
     );
   }
 

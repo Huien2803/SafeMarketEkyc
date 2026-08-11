@@ -223,7 +223,7 @@ class _ChatScreenState extends State<ChatScreen> {
         setState(() => _thread = detail);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Đã xác nhận bán — đơn hàng đã tạo'),
+            content: Text('Đã xác nhận bán / giao hàng'),
             backgroundColor: AppColors.trustGreen,
           ),
         );

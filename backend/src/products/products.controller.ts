@@ -111,6 +111,7 @@ export class ProductsController {
   @Post(':id/hide')
   @ApiBearerAuth('JWT-auth')
   @UseGuards(AuthGuard('jwt'))
+  @ApiOperation({ summary: 'Ẩn tin đăng (Available → Hidden)' })
   hideProduct(
     @CurrentUser() user: User,
     @Param('id', ParseIntPipe) id: number,
@@ -118,9 +119,21 @@ export class ProductsController {
     return this.productsService.hideProduct(id, Number(user.userId));
   }
 
+  @Post(':id/unhide')
+  @ApiBearerAuth('JWT-auth')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiOperation({ summary: 'Hiện lại tin đã ẩn (Hidden → Available)' })
+  unhideProduct(
+    @CurrentUser() user: User,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.productsService.unhideProduct(id, Number(user.userId));
+  }
+
   @Delete(':id')
   @ApiBearerAuth('JWT-auth')
   @UseGuards(AuthGuard('jwt'))
+  @ApiOperation({ summary: 'Xóa tin đăng (Available hoặc Hidden)' })
   deleteProduct(
     @CurrentUser() user: User,
     @Param('id', ParseIntPipe) id: number,

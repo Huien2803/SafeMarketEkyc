@@ -87,6 +87,7 @@ class ProductDetail {
     required this.conditionPct,
     required this.status,
     required this.seller,
+    this.categoryId,
     this.thumbnailUrl,
     this.imageUrls = const [],
   });
@@ -100,6 +101,7 @@ class ProductDetail {
   final int conditionPct;
   final String status;
   final AuthUser seller;
+  final int? categoryId;
   final String? thumbnailUrl;
   final List<String> imageUrls;
 
@@ -121,6 +123,7 @@ class ProductDetail {
       conditionPct: (json['conditionPct'] as num?)?.toInt() ?? 100,
       status: json['status'] as String? ?? 'Available',
       seller: AuthUser.fromJson(sellerJson),
+      categoryId: (json['categoryId'] as num?)?.toInt(),
       thumbnailUrl: json['thumbnailUrl'] as String?,
       imageUrls: rawImages is List
           ? rawImages.map((e) => e.toString()).toList()

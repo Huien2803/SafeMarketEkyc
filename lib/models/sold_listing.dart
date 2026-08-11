@@ -24,8 +24,12 @@ class SoldListing {
   final String? thumbnailUrl;
 
   bool get isSold => productStatus == 'Sold';
+  bool get isHidden => productStatus == 'Hidden';
   bool get isActive =>
       productStatus == 'Available' || productStatus == 'Reserved';
+  /// Tin seller còn quản lý được (sửa/ẩn/hiện/xóa tùy trạng thái).
+  bool get isManageable =>
+      productStatus == 'Available' || productStatus == 'Hidden';
 
   factory SoldListing.fromJson(Map<String, dynamic> json) {
     return SoldListing(

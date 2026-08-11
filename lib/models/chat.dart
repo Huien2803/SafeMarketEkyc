@@ -126,13 +126,15 @@ class ChatThreadDetail {
       hasActiveOrder &&
       (orderStatus == null || orderStatus == 'Pending');
 
-  /// Người bán chỉ xác nhận sau khi escrow đã Paid (hoặc đơn không phải online).
+  /// Người bán chỉ xác nhận khi còn đúng bước chờ xác nhận (tránh hiện nút 2 lần).
+  /// - Escrow: chỉ khi Paid (đã trả, chưa giao / chưa Shipped)
+  /// - Khác: khi Pending
   bool get sellerCanConfirmPurchase {
     if (!hasActiveOrder) return false;
-    if (!isOnlineEscrow) return true;
-    return orderStatus != null &&
-        orderStatus != 'Pending' &&
-        orderStatus != 'Cancelled';
+    if (isOnlineEscrow) {
+      return orderStatus == 'Paid';
+    }
+    return orderStatus == 'Pending' || orderStatus == null;
   }
 
   /// Chỉ gắn đầu chat khi chưa có đơn đang chạy (đã mua thì gỡ strip).

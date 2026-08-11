@@ -5,13 +5,16 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
 import 'package:safemarket_app/models/product.dart';
-import 'package:safemarket_app/services/auth_service.dart';
+import 'package:safemarket_app/services/api_config.dart';
 import 'package:safemarket_app/services/product_service.dart';
 import 'package:safemarket_app/utils/input_validators.dart';
 
-/// Đăng bán sản phẩm — ảnh bắt buộc.
+/// Đăng bán / sửa tin sản phẩm — ảnh bắt buộc khi đăng mới.
 class PostProductScreen extends StatefulWidget {
-  const PostProductScreen({super.key});
+  const PostProductScreen({super.key, this.editProductId});
+
+  /// Nếu có: chế độ sửa tin (PUT metadata, giữ ảnh cũ).
+  final int? editProductId;
 
   @override
   State<PostProductScreen> createState() => _PostProductScreenState();
@@ -33,12 +36,23 @@ class _PostProductScreenState extends State<PostProductScreen> {
   double _condition = 85;
   bool _loading = false;
   bool _loadingCats = true;
+  bool _loadingEdit = false;
+  String? _existingThumbUrl;
+
+  bool get _isEdit => widget.editProductId != null;
 
   @override
   void initState() {
     super.initState();
-    _locationCtrl.text = 'Quận 1, TP.HCM';
-    _loadCategories();
+    if (!_isEdit) {
+      _locationCtrl.text = 'Quận 1, TP.HCM';
+    }
+    _bootstrap();
+  }
+
+  Future<void> _bootstrap() async {
+    await _loadCategories();
+    if (_isEdit) await _loadForEdit();
   }
 
   @override
@@ -56,12 +70,43 @@ class _PostProductScreenState extends State<PostProductScreen> {
       if (mounted) {
         setState(() {
           _categories = cats;
-          _categoryId = cats.isNotEmpty ? cats.first.categoryId : null;
+          if (!_isEdit) {
+            _categoryId = cats.isNotEmpty ? cats.first.categoryId : null;
+          }
           _loadingCats = false;
         });
       }
     } catch (_) {
       if (mounted) setState(() => _loadingCats = false);
+    }
+  }
+
+  Future<void> _loadForEdit() async {
+    setState(() => _loadingEdit = true);
+    try {
+      final p = await ProductService.instance.getProductDetail(
+        widget.editProductId!,
+      );
+      if (!mounted) return;
+      setState(() {
+        _titleCtrl.text = p.title;
+        _descCtrl.text = p.description;
+        _priceCtrl.text = p.price.toString();
+        _locationCtrl.text = p.location;
+        _condition = p.conditionPct.toDouble().clamp(65, 100);
+        _categoryId = p.categoryId ??
+            (_categories.isNotEmpty ? _categories.first.categoryId : null);
+        _existingThumbUrl = p.thumbnailUrl ??
+            (p.imageUrls.isNotEmpty ? p.imageUrls.first : null);
+        _loadingEdit = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingEdit = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Không tải tin để sửa: $e')),
+      );
+      Navigator.pop(context);
     }
   }
 
@@ -146,7 +191,7 @@ class _PostProductScreenState extends State<PostProductScreen> {
   }
 
   Future<void> _submit() async {
-    if (_images.isEmpty) {
+    if (!_isEdit && _images.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Vui lòng thêm ít nhất 1 ảnh sản phẩm (bắt buộc)'),
@@ -172,19 +217,34 @@ class _PostProductScreenState extends State<PostProductScreen> {
 
     setState(() => _loading = true);
     try {
-      await ProductService.instance.createProduct(
-        images: _images,
-        title: _titleCtrl.text.trim(),
-        description: _descCtrl.text.trim(),
-        price: int.parse(_priceCtrl.text.replaceAll('.', '').replaceAll(',', '')),
-        conditionPct: _condition.round(),
-        location: _locationCtrl.text.trim(),
-        categoryId: _categoryId!,
+      final price = int.parse(
+        _priceCtrl.text.replaceAll('.', '').replaceAll(',', ''),
       );
+      if (_isEdit) {
+        await ProductService.instance.updateProduct(
+          widget.editProductId!,
+          title: _titleCtrl.text.trim(),
+          description: _descCtrl.text.trim(),
+          price: price,
+          conditionPct: _condition.round(),
+          location: _locationCtrl.text.trim(),
+          categoryId: _categoryId!,
+        );
+      } else {
+        await ProductService.instance.createProduct(
+          images: _images,
+          title: _titleCtrl.text.trim(),
+          description: _descCtrl.text.trim(),
+          price: price,
+          conditionPct: _condition.round(),
+          location: _locationCtrl.text.trim(),
+          categoryId: _categoryId!,
+        );
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Đăng bán thành công!'),
+        SnackBar(
+          content: Text(_isEdit ? 'Đã cập nhật tin đăng!' : 'Đăng bán thành công!'),
           backgroundColor: AppColors.trustGreen,
         ),
       );
@@ -201,6 +261,34 @@ class _PostProductScreenState extends State<PostProductScreen> {
   }
 
   Widget _buildImagePicker() {
+    if (_isEdit) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_existingThumbUrl != null && _existingThumbUrl!.isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image.network(
+                ApiConfig.mediaUrl(_existingThumbUrl),
+                width: 110,
+                height: 110,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  width: 110,
+                  height: 110,
+                  color: const Color(0xFFE5E7EB),
+                  child: const Icon(Icons.image_outlined),
+                ),
+              ),
+            ),
+          const SizedBox(height: 8),
+          const Text(
+            'Bản này giữ ảnh cũ khi sửa tin (đổi ảnh: ẩn tin cũ và đăng lại).',
+            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+          ),
+        ],
+      );
+    }
     return SizedBox(
       height: 110,
       child: ListView.separated(
@@ -308,12 +396,12 @@ class _PostProductScreenState extends State<PostProductScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Đăng bán sản phẩm'),
+        title: Text(_isEdit ? 'Sửa tin đăng' : 'Đăng bán sản phẩm'),
         backgroundColor: AppColors.white,
         foregroundColor: AppColors.textPrimary,
         elevation: 0,
       ),
-      body: _loadingCats
+      body: (_loadingCats || _loadingEdit)
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
               padding: const EdgeInsets.all(20),
@@ -453,9 +541,9 @@ class _PostProductScreenState extends State<PostProductScreen> {
                                 color: Colors.white,
                               ),
                             )
-                          : const Text(
-                              'Đăng bán ngay',
-                              style: TextStyle(
+                          : Text(
+                              _isEdit ? 'Lưu thay đổi' : 'Đăng bán ngay',
+                              style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w700,
                               ),

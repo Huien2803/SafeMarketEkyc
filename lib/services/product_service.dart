@@ -188,8 +188,7 @@ class ProductService {
         )
         .timeout(ApiConfig.timeout);
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      throw Exception(decoded['message'] ?? 'Không cập nhật được sản phẩm');
+      throw Exception(_messageFromBody(res.body, 'Không cập nhật được sản phẩm'));
     }
   }
 
@@ -202,7 +201,20 @@ class ProductService {
       headers: {'Authorization': 'Bearer $token'},
     ).timeout(ApiConfig.timeout);
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw Exception('Không ẩn được sản phẩm');
+      throw Exception(_messageFromBody(res.body, 'Không ẩn được sản phẩm'));
+    }
+  }
+
+  Future<void> unhideProduct(int id) async {
+    final token = AuthService.instance.accessToken;
+    if (token == null) throw Exception('Cần đăng nhập');
+    final uri = Uri.parse('${ApiConfig.baseUrl}/products/$id/unhide');
+    final res = await http.post(
+      uri,
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(ApiConfig.timeout);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception(_messageFromBody(res.body, 'Không hiện lại được sản phẩm'));
     }
   }
 
@@ -215,8 +227,20 @@ class ProductService {
       headers: {'Authorization': 'Bearer $token'},
     ).timeout(ApiConfig.timeout);
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw Exception('Không xóa được sản phẩm');
+      throw Exception(_messageFromBody(res.body, 'Không xóa được sản phẩm'));
     }
+  }
+
+  String _messageFromBody(String body, String fallback) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map && decoded['message'] != null) {
+        final m = decoded['message'];
+        if (m is List) return m.join(', ');
+        return m.toString();
+      }
+    } catch (_) {}
+    return fallback;
   }
 
   Future<http.MultipartFile> _imagePart(XFile file) async {
