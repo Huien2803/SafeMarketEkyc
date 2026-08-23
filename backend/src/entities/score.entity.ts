@@ -22,7 +22,7 @@ export class Score {
     name: 'rank_level',
     type: 'nvarchar',
     length: 20,
-    default: 'Bronze',
+    default: 'Silver',
   })
   rankLevel: RankLevel;
 

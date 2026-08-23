@@ -166,7 +166,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
     });
   }
 
-  /// Hủy đơn: xác nhận + cho nhập lý do. Cảnh báo hoàn tiền/trừ điểm nếu đã trả.
+  /// Hủy đơn: xác nhận + cho nhập lý do. Cảnh báo hoàn escrow nếu đang giữ.
   Future<void> _cancelOrder(OrderItem o) async {
     if (_busy) return;
     final reasonCtrl = TextEditingController();
@@ -184,7 +184,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
               holdingEscrow
                   ? 'Tiền escrow đang tạm giữ sẽ được hoàn lại cho người mua.'
                   : paid
-                      ? 'Đơn đã thanh toán — hủy lúc này có thể bị trừ điểm tín nhiệm.'
+                      ? 'Đơn đã thanh toán / đang giao. Hủy sẽ kết thúc giao dịch, không trừ điểm tín nhiệm.'
                       : 'Bạn có chắc muốn hủy đơn hàng này? '
                           'Thao tác này không mở cổng thanh toán.',
               style: const TextStyle(fontSize: 13, height: 1.4),
@@ -732,6 +732,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   ),
                   if (o.isShipOrder) ...[
                     const SizedBox(height: 8),
+                    const Text(
+                      'Khiếu nại chỉ được gửi trong vòng 3 ngày kể từ khi '
+                      'người bán xác nhận đã giao hàng.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.35,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     OutlinedButton.icon(
                       onPressed: _busy
                           ? null
@@ -875,9 +885,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen>
                   '• Giao dịch hoàn tất: +20 điểm mỗi bên\n'
                   '• Đánh giá 5★: +30 | 4★: không đổi\n'
                   '• Đánh giá 3★: −10 | 2★: −20 | 1★: −30\n'
-                  '• Người mua không nhận hàng: người bán −80\n'
-                  '• Giao hàng sai: người bán −60\n'
-                  '• Hủy đơn sau thanh toán: −30 điểm',
+                  '• Khiếu nại (admin xử lý): trừ điểm bên bị xử thua\n'
+                  '• Hủy đơn: không trừ điểm',
                   style: TextStyle(
                     fontSize: 13,
                     color: AppColors.textSecondary,

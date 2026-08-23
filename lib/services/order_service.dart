@@ -12,15 +12,14 @@ class OrderService {
   OrderService._();
   static final OrderService instance = OrderService._();
 
-  Future<http.Response> _authGet(Uri uri) =>
+  Future<http.Response> _authGet(String path) =>
       AuthService.instance.authorizedRequest(
-        (h) => http.get(uri, headers: h).timeout(ApiConfig.timeout),
+        (h) => ApiConfig.httpGet(path, headers: h),
       );
 
-  Future<http.Response> _authPost(Uri uri, {Object? body}) =>
+  Future<http.Response> _authPost(String path, {Object? body}) =>
       AuthService.instance.authorizedRequest(
-        (h) =>
-            http.post(uri, headers: h, body: body).timeout(ApiConfig.timeout),
+        (h) => ApiConfig.httpPost(path, headers: h, body: body),
       );
 
   Map<String, dynamic> _decodeMap(http.Response res) {
@@ -48,6 +47,13 @@ class OrderService {
     if (res.statusCode == 401) {
       throw Exception('Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.');
     }
+    if (res.statusCode == 403) {
+      throw Exception(
+        msg is String && msg.trim().isNotEmpty
+            ? msg
+            : 'Bạn không có quyền thực hiện thao tác này.',
+      );
+    }
     throw Exception('$fallback (${res.statusCode})');
   }
 
@@ -57,10 +63,9 @@ class OrderService {
     String paymentMethod = 'CASH',
     String deliveryMethod = 'DIRECT',
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/orders');
     final res = await _authPost(
-      uri,
-      body: jsonEncode({
+      '/orders',
+      body: ApiConfig.encodeBody({
         'productId': productId,
         'shippingAddress': shippingAddress,
         'paymentMethod': paymentMethod,
@@ -74,8 +79,7 @@ class OrderService {
   }
 
   Future<OrderItem> getOrder(int orderId) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/orders/$orderId');
-    final res = await _authGet(uri);
+    final res = await _authGet('/orders/$orderId');
     if (res.statusCode != 200) {
       _throwApi(res, 'Không tải được đơn hàng');
     }
@@ -83,8 +87,7 @@ class OrderService {
   }
 
   Future<List<OrderItem>> getMyOrders() async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/orders/my');
-    final res = await _authGet(uri);
+    final res = await _authGet('/orders/my');
     if (res.statusCode != 200) return [];
     final decoded = jsonDecode(res.body);
     if (decoded is! List) return [];
@@ -115,11 +118,9 @@ class OrderService {
     required String deliveryMethod,
     String? shippingAddress,
   }) async {
-    final uri =
-        Uri.parse('${ApiConfig.baseUrl}/orders/$orderId/payment-method');
     final res = await _authPost(
-      uri,
-      body: jsonEncode({
+      '/orders/$orderId/payment-method',
+      body: ApiConfig.encodeBody({
         'paymentMethod': paymentMethod,
         'deliveryMethod': deliveryMethod,
         if (shippingAddress != null && shippingAddress.isNotEmpty)
@@ -144,40 +145,42 @@ class OrderService {
   /// Người mua xác nhận đã nhận hàng kèm ảnh bằng chứng (bắt buộc).
   Future<OrderItem> markCompleted(int orderId, {required XFile proofImage}) async {
     Future<http.Response> send(Map<String, String> headers) async {
-      final uri = Uri.parse('${ApiConfig.baseUrl}/orders/$orderId/complete');
-      final req = http.MultipartRequest('POST', uri)
-        ..headers['Accept'] = 'application/json';
-      final auth = headers['Authorization'];
-      if (auth != null) req.headers['Authorization'] = auth;
+      return ApiConfig.withFailover((base) async {
+        final uri = Uri.parse('$base/orders/$orderId/complete');
+        final req = http.MultipartRequest('POST', uri)
+          ..headers['Accept'] = 'application/json';
+        final auth = headers['Authorization'];
+        if (auth != null) req.headers['Authorization'] = auth;
 
-      final bytes = await proofImage.readAsBytes();
-      if (bytes.isEmpty) {
-        throw Exception('Ảnh xác nhận trống — vui lòng chụp lại');
-      }
-      // Android camera thường trả path không có đuôi / mimetype → server từ chối.
-      final rawName = proofImage.name.trim();
-      final lower = rawName.toLowerCase();
-      final hasExt = lower.endsWith('.jpg') ||
-          lower.endsWith('.jpeg') ||
-          lower.endsWith('.png') ||
-          lower.endsWith('.webp');
-      final filename = hasExt ? rawName : 'receipt.jpg';
-      final mime = proofImage.mimeType;
-      final contentType = (mime != null && mime.startsWith('image/'))
-          ? MediaType.parse(mime)
-          : MediaType('image', 'jpeg');
+        final bytes = await proofImage.readAsBytes();
+        if (bytes.isEmpty) {
+          throw Exception('Ảnh xác nhận trống — vui lòng chụp lại');
+        }
+        // Android camera thường trả path không có đuôi / mimetype → server từ chối.
+        final rawName = proofImage.name.trim();
+        final lower = rawName.toLowerCase();
+        final hasExt = lower.endsWith('.jpg') ||
+            lower.endsWith('.jpeg') ||
+            lower.endsWith('.png') ||
+            lower.endsWith('.webp');
+        final filename = hasExt ? rawName : 'receipt.jpg';
+        final mime = proofImage.mimeType;
+        final contentType = (mime != null && mime.startsWith('image/'))
+            ? MediaType.parse(mime)
+            : MediaType('image', 'jpeg');
 
-      req.files.add(
-        http.MultipartFile.fromBytes(
-          'proof',
-          bytes,
-          filename: filename,
-          contentType: contentType,
-        ),
-      );
+        req.files.add(
+          http.MultipartFile.fromBytes(
+            'proof',
+            bytes,
+            filename: filename,
+            contentType: contentType,
+          ),
+        );
 
-      final streamed = await req.send().timeout(const Duration(seconds: 60));
-      return http.Response.fromStream(streamed);
+        final streamed = await req.send().timeout(const Duration(seconds: 60));
+        return http.Response.fromStream(streamed);
+      });
     }
 
     final res = await AuthService.instance.authorizedRequest(send);
@@ -188,10 +191,9 @@ class OrderService {
   }
 
   Future<OrderItem> cancelOrder(int orderId, {String reason = 'Hủy đơn'}) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/orders/$orderId/cancel');
     final res = await _authPost(
-      uri,
-      body: jsonEncode({'reason': reason}),
+      '/orders/$orderId/cancel',
+      body: ApiConfig.encodeBody({'reason': reason}),
     );
     if (res.statusCode >= 200 && res.statusCode < 300) {
       return OrderItem.fromJson(_decodeMap(res));
@@ -204,10 +206,9 @@ class OrderService {
     required String type,
     String note = '',
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/orders/$orderId/dispute');
     final res = await _authPost(
-      uri,
-      body: jsonEncode({'type': type, 'note': note}),
+      '/orders/$orderId/dispute',
+      body: ApiConfig.encodeBody({'type': type, 'note': note}),
     );
     if (res.statusCode >= 200 && res.statusCode < 300) {
       return OrderItem.fromJson(_decodeMap(res));
@@ -216,8 +217,7 @@ class OrderService {
   }
 
   Future<OrderItem> _postAction(int orderId, String action) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/orders/$orderId/$action');
-    final res = await _authPost(uri);
+    final res = await _authPost('/orders/$orderId/$action');
     if (res.statusCode >= 200 && res.statusCode < 300) {
       return OrderItem.fromJson(_decodeMap(res));
     }
@@ -225,8 +225,7 @@ class OrderService {
   }
 
   Future<List<SoldListing>> getSoldProducts() async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/users/me/sold-products');
-    final res = await _authGet(uri);
+    final res = await _authGet('/users/me/sold-products');
     if (res.statusCode != 200) return [];
     final decoded = jsonDecode(res.body);
     if (decoded is! List) return [];
@@ -237,8 +236,7 @@ class OrderService {
   }
 
   Future<List<SoldListing>> getUserListings(int userId) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/users/$userId/listings');
-    final res = await _authGet(uri);
+    final res = await _authGet('/users/$userId/listings');
     if (res.statusCode != 200) return [];
     final decoded = jsonDecode(res.body);
     if (decoded is! List) return [];

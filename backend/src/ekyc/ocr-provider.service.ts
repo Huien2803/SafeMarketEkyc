@@ -61,10 +61,23 @@ export class OcrProviderService {
     );
   }
 
-  matchFace(
+  async matchFace(
     idCard: Express.Multer.File,
     selfie: Express.Multer.File,
   ): Promise<FaceMatchResult> {
+    if (this.provider === 'vnpt' && this.vnpt.isConfigured()) {
+      try {
+        return await this.vnpt.matchFace(idCard, selfie);
+      } catch (err) {
+        this.logger.warn(
+          `VNPT Face Compare lỗi → fallback FPT: ${(err as Error).message}`,
+        );
+        if (this.fpt.hasRealApiKey()) {
+          return this.fpt.matchFace(idCard, selfie);
+        }
+        throw err;
+      }
+    }
     return this.fpt.matchFace(idCard, selfie);
   }
 

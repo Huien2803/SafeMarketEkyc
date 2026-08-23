@@ -280,8 +280,7 @@ Admin mở dispute vẫn xem được proof URL.
 - ONLINE_ESCROW Holding → `refundEscrow` → Refunded.  
 - **Không** gọi `adjustPoints`.  
 
-⚠️ **Bẫy UI:** `order_detail_screen.dart` có chữ “Hủy đơn sau thanh toán: −30 điểm” — **backend không trừ**.  
-Khi bị hỏi: nói đúng API; thừa nhận UI cảnh báo chưa khớp rule (hướng sửa: hoặc bỏ text, hoặc implement penalty).
+UI chi tiết đơn ghi **“Hủy đơn: không trừ điểm”** — khớp API. Phạt điểm khi hủy **không** có; phạt chủ yếu qua review / dispute / admin.
 
 ### Q4.6. Dispute user khác Admin resolve thế nào?
 
@@ -598,7 +597,7 @@ MISLEADING / OFFENSIVE_SPAM / OTHER → medium.
 
 | Thầy nói / UI ghi | Sự thật trong code |
 |-------------------|-------------------|
-| Hủy đơn −30 điểm | `cancel` **không** trừ điểm |
+| Hủy đơn có trừ điểm không? | **Không** — `cancel` không gọi `adjustPoints` |
 | Không nhận hàng seller −80; giao sai −60 | Dispute mặc định **−50**, admin chỉnh; không map 80/60 |
 | Escrow = ngân hàng giữ tiền thật | Trạng thái Payment + ví nội bộ; VNPay sandbox |
 | Thuật toán AI | Rule-based scoring |
@@ -747,7 +746,7 @@ Redis session/OTP; phân trang; unique constraint idempotent keys; khớp UI pen
 | Chống double-sell? | lock + CAS + UNIQUE product |
 | Chat DB? | Firebase (app) |
 | Tiền DB? | SQL |
-| Hủy có −30? | **Không** (API) |
+| Hủy có trừ điểm? | **Không** |
 
 ---
 

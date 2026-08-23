@@ -9,6 +9,7 @@ import axios, { AxiosError } from 'axios';
 import { createPublicKey, publicEncrypt, constants, randomUUID } from 'crypto';
 import FormData = require('form-data');
 import {
+  FaceMatchResult,
   IdCardBackOcr,
   IdCardFrontOcr,
 } from './fpt-ai.service';
@@ -91,6 +92,90 @@ export class VnptEkycService {
       raw = await this.callOcr({ img_front: backHash });
     }
     return this.mapBack(raw);
+  }
+
+  /**
+   * So khớp ảnh chân dung CCCD (img_front) với selfie đang xác thực (img_face).
+   * POST /ai/v1/face/compare — cùng cơ chế token RSA như OCR.
+   */
+  async matchFace(
+    idCardImage: Express.Multer.File,
+    selfieImage: Express.Multer.File,
+  ): Promise<FaceMatchResult> {
+    this.assertConfigured();
+    const imgFront = await this.uploadFile(idCardImage, 'cccd_front_compare');
+    const imgFace = await this.uploadFile(selfieImage, 'selfie_compare');
+    const clientSession = randomUUID();
+    const token = this.encryptChallenge(clientSession);
+
+    try {
+      const res = await axios.post(
+        `${this.baseUrl}/ai/v1/face/compare`,
+        {
+          img_front: imgFront,
+          img_face: imgFace,
+          token,
+          client_session: clientSession,
+        },
+        {
+          headers: {
+            ...this.authHeaders(),
+            'Content-Type': 'application/json',
+          },
+          timeout: 60_000,
+        },
+      );
+
+      const payload = this.unwrapVnptPayload(res.data);
+      if (payload.statusCode && String(payload.statusCode) !== '200') {
+        const errors = Array.isArray(payload.errors)
+          ? payload.errors.join('; ')
+          : payload.message || payload.error || 'so khớp khuôn mặt thất bại';
+        throw new BadRequestException(`VNPT Face Compare lỗi: ${errors}`);
+      }
+
+      const obj = (payload.object ??
+        payload.data ??
+        payload.compare ??
+        payload) as Record<string, unknown>;
+      const rawSim = Number(
+        obj.prob ?? obj.similarity ?? obj.match_conf ?? obj.score ?? 0,
+      );
+      const similarity =
+        !Number.isFinite(rawSim) || rawSim < 0
+          ? 0
+          : rawSim > 1
+            ? Math.min(rawSim / 100, 1)
+            : rawSim;
+      const resultStr = String(
+        obj.result ?? obj.msg ?? obj.match ?? '',
+      ).toLowerCase();
+      const vnptMatch =
+        (resultStr.includes('match') && !resultStr.includes('not')) ||
+        resultStr === 'true' ||
+        obj.result === true;
+      const threshold = Number(
+        this.config.get<string>('EKYC_FACE_MATCH_THRESHOLD', '0.72'),
+      );
+      const isMatch = vnptMatch || similarity >= threshold;
+
+      this.logger.log(
+        `VNPT Face Compare: isMatch=${isMatch} flag=${vnptMatch} ` +
+          `similarity=${(similarity * 100).toFixed(1)}% raw=${rawSim}`,
+      );
+
+      return {
+        isMatch,
+        similarity,
+        message: isMatch
+          ? `Khuôn mặt khớp ảnh CCCD (${(similarity * 100).toFixed(0)}%).`
+          : `Khuôn mặt không khớp ảnh trên CCCD (độ tương đồng ${(similarity * 100).toFixed(0)}%, cần ≥ ${(threshold * 100).toFixed(0)}%).`,
+        rawResponse: payload,
+      };
+    } catch (err) {
+      if (err instanceof BadRequestException) throw err;
+      this.handleAxiosError(err, 'Face Compare');
+    }
   }
 
   private assertConfigured(): void {

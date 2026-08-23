@@ -17,10 +17,9 @@ class UserService {
       throw AuthException('Chưa đăng nhập', statusCode: 401);
     }
 
-    final uri = Uri.parse('${ApiConfig.baseUrl}/users/me');
     try {
       final response = await AuthService.instance.authorizedRequest(
-        (h) => http.get(uri, headers: h).timeout(ApiConfig.timeout),
+        (h) => ApiConfig.httpGet('/users/me', headers: h),
       );
 
       final decoded = response.body.isNotEmpty
@@ -54,17 +53,14 @@ class UserService {
   /// Profile public của user khác (trust score, eKYC…).
   Future<UserProfile> getProfile(int userId) async {
     final token = AuthService.instance.accessToken;
-    final uri = Uri.parse('${ApiConfig.baseUrl}/users/$userId');
     try {
-      final response = await http
-          .get(
-            uri,
-            headers: {
-              'Accept': 'application/json',
-              if (token != null) 'Authorization': 'Bearer $token',
-            },
-          )
-          .timeout(ApiConfig.timeout);
+      final response = await ApiConfig.httpGet(
+        '/users/$userId',
+        headers: {
+          'Accept': 'application/json',
+          if (token != null) 'Authorization': 'Bearer $token',
+        },
+      );
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         return UserProfile.fromJson(
@@ -106,18 +102,11 @@ class UserService {
     if (location != null) body['location'] = location;
     if (avatarUrl != null) body['avatarUrl'] = avatarUrl;
 
-    final uri = Uri.parse('${ApiConfig.baseUrl}/users/me');
-    final response = await http
-        .put(
-          uri,
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $token',
-          },
-          body: jsonEncode(body),
-        )
-        .timeout(ApiConfig.timeout);
+    final response = await ApiConfig.httpPut(
+      '/users/me',
+      headers: ApiConfig.jsonHeaders(token: token),
+      body: ApiConfig.encodeBody(body),
+    );
 
     final decoded = response.body.isNotEmpty
         ? jsonDecode(response.body) as Map<String, dynamic>
@@ -141,8 +130,6 @@ class UserService {
       throw AuthException('Chưa đăng nhập', statusCode: 401);
     }
 
-    final uri = Uri.parse('${ApiConfig.baseUrl}/users/me/avatar');
-
     // Đọc bytes thay vì path để chạy được cả trên web (path là blob URL).
     final bytes = await image.readAsBytes();
     final name = (image.name).toLowerCase();
@@ -165,20 +152,23 @@ class UserService {
             ? 'webp'
             : 'jpg';
 
-    final req = http.MultipartRequest('POST', uri)
-      ..headers['Authorization'] = 'Bearer $token'
-      ..files.add(
-        http.MultipartFile.fromBytes(
-          'avatar',
-          bytes,
-          filename: name.isNotEmpty ? name : 'avatar.$ext',
-          contentType: mime,
-        ),
-      );
-
     try {
-      final streamed = await req.send().timeout(const Duration(seconds: 45));
-      final res = await http.Response.fromStream(streamed);
+      final res = await ApiConfig.withFailover((base) async {
+        final uri = Uri.parse('$base/users/me/avatar');
+        final req = http.MultipartRequest('POST', uri)
+          ..headers['Authorization'] = 'Bearer $token'
+          ..files.add(
+            http.MultipartFile.fromBytes(
+              'avatar',
+              bytes,
+              filename: name.isNotEmpty ? name : 'avatar.$ext',
+              contentType: mime,
+            ),
+          );
+        final streamed = await req.send().timeout(const Duration(seconds: 45));
+        return http.Response.fromStream(streamed);
+      });
+
       final decoded = res.body.isNotEmpty
           ? jsonDecode(res.body) as Map<String, dynamic>
           : <String, dynamic>{};

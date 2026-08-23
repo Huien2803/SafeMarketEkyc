@@ -13,6 +13,7 @@ import 'package:safemarket_app/screens/edit_profile_screen.dart';
 import 'package:safemarket_app/screens/seller_reviews_screen.dart';
 import 'package:safemarket_app/screens/product_detail.dart';
 import 'package:safemarket_app/screens/post_product_screen.dart';
+import 'package:safemarket_app/screens/purchase_history_screen.dart';
 import 'package:safemarket_app/screens/wallet_screen.dart';
 import 'package:safemarket_app/screens/follow_list_screen.dart';
 import 'package:safemarket_app/services/order_service.dart';
@@ -389,6 +390,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               Icons.chevron_right,
                               color: AppColors.textMuted,
                             ),
+                            onTap: () {
+                              final initialTab =
+                                  profile.soldCount > profile.boughtCount ? 1 : 0;
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => PurchaseHistoryScreen(
+                                    initialTab: initialTab,
+                                  ),
+                                ),
+                              );
+                            },
                           ),
                           const SizedBox(height: 24),
                           Row(

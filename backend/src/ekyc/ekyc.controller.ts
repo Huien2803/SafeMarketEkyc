@@ -27,7 +27,6 @@ import { User } from '../entities/user.entity';
 import { EkycService } from './ekyc.service';
 import { OcrProviderService } from './ocr-provider.service';
 import { EkycSessionService } from './ekyc-session.service';
-import { FptAiService } from './fpt-ai.service';
 import {
   ScanIdFrontResponseDto,
   ScanIdBackResponseDto,
@@ -59,7 +58,6 @@ export class EkycController {
     private readonly ekycService: EkycService,
     private readonly ocr: OcrProviderService,
     private readonly sessions: EkycSessionService,
-    private readonly fpt: FptAiService,
     private readonly config: ConfigService,
   ) {}
 
@@ -233,6 +231,7 @@ export class EkycController {
       isMatch: result.isMatch,
       similarity: result.similarity,
       message: result.message,
+      mode: result.mode,
     };
   }
 
@@ -255,14 +254,17 @@ export class EkycController {
     return this.ekycService.getMyStatus(Number(user.userId));
   }
 
-  /** FPT Face Match nếu có key; không thì attested (thesis) sau liveness đạt. */
+  /**
+   * So khớp thật selfie vs CCCD (VNPT/FPT).
+   * `attested` chỉ khi EKYC_FACE_MATCH_MODE=attested (demo) — không tự fallback.
+   */
   private async runFaceMatch(
     idCard: Express.Multer.File,
     selfie: Express.Multer.File,
   ): Promise<{
     similarity: number;
     isMatch: boolean;
-    mode: 'fpt' | 'attested';
+    mode: 'fpt' | 'vnpt' | 'attested';
     message: string;
   }> {
     const mode = (
@@ -271,47 +273,22 @@ export class EkycController {
       .trim()
       .toLowerCase();
 
-    const canFpt =
-      mode !== 'attested' &&
-      typeof (this.fpt as any).hasRealApiKey === 'function'
-        ? (this.fpt as any).hasRealApiKey()
-        : mode === 'fpt';
-
-    // Thử FPT khi auto/fpt
-    if (mode === 'fpt' || (mode === 'auto' && this.fptKeyLooksReal())) {
-      try {
-        const r = await this.ocr.matchFace(idCard, selfie);
-        return {
-          similarity: r.similarity,
-          isMatch: r.isMatch,
-          mode: 'fpt',
-          message: r.message || 'So khớp khuôn mặt với CCCD thành công.',
-        };
-      } catch (e) {
-        if (mode === 'fpt') throw e;
-        // auto: fallback attested nếu FPT lỗi (rate limit / key)
-      }
+    if (mode === 'attested') {
+      return {
+        similarity: 0.85,
+        isMatch: true,
+        mode: 'attested',
+        message:
+          'Chế độ attested: bỏ qua so khớp CCCD (chỉ Face ID sống). Không dùng khi bảo vệ.',
+      };
     }
 
-    // Attested: đã vượt Face ID sống trên thiết bị + server đã lưu selfie
+    const r = await this.ocr.matchFace(idCard, selfie);
     return {
-      similarity: 0.85,
-      isMatch: true,
-      mode: 'attested',
-      message:
-        'Đã xác minh khuôn mặt sống (Face ID). Chế độ attested (chưa cấu hình FPT Face Match).',
+      similarity: r.similarity,
+      isMatch: r.isMatch,
+      mode: this.ocr.activeProvider,
+      message: r.message || 'So khớp khuôn mặt với CCCD thành công.',
     };
-  }
-
-  private fptKeyLooksReal(): boolean {
-    const key = (this.config.get<string>('FPT_AI_API_KEY', '') || '').trim();
-    if (!key) return false;
-    const lower = key.toLowerCase();
-    return !(
-      lower.includes('your_fpt') ||
-      lower === 'changeme' ||
-      lower.includes('xxx') ||
-      lower === 'api_key_here'
-    );
   }
 }

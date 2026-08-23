@@ -118,7 +118,7 @@ GO
 CREATE TABLE [Reputation].[Scores] (
     [score_id]      BIGINT IDENTITY(1,1) NOT NULL,
     [current_point] INT NOT NULL DEFAULT 500,
-    [rank_level]    NVARCHAR(20) NOT NULL DEFAULT 'Bronze',
+    [rank_level]    NVARCHAR(20) NOT NULL DEFAULT 'Silver',
     [updated_at]    DATETIME2 NOT NULL DEFAULT GETDATE(),
     [user_id]       BIGINT NOT NULL,
     PRIMARY KEY ([score_id]),
@@ -233,7 +233,7 @@ CREATE TABLE [Reputation].[Reviews] (
     [reviewee_id] BIGINT NOT NULL,
     [created_at]  DATETIME2 NOT NULL DEFAULT GETDATE(),
     PRIMARY KEY ([review_id]),
-    CONSTRAINT UQ_Reviews_Order UNIQUE ([order_id]),
+    CONSTRAINT UQ_Reviews_Order_Reviewer UNIQUE ([order_id], [reviewer_id]),
     CONSTRAINT CK_Reviews_Rating CHECK ([rating] BETWEEN 1 AND 5),
     FOREIGN KEY ([order_id])    REFERENCES [Finance].[Orders]([order_id]),
     FOREIGN KEY ([reviewer_id]) REFERENCES [Identity].[Users]([user_id]),
@@ -281,7 +281,7 @@ GO
 -- BƯỚC 5: TRIGGERS
 -- ==========================================
 
--- 5.1 Tạo điểm 500 + Bronze khi đăng ký User mới
+-- 5.1 Tạo điểm 500 + Silver khi đăng ký User mới (300–599 = Silver)
 CREATE TRIGGER [Identity].[trg_InitializeReputation]
 ON [Identity].[Users]
 AFTER INSERT
@@ -289,7 +289,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     INSERT INTO [Reputation].[Scores] ([user_id], [current_point], [rank_level])
-    SELECT [user_id], 500, N'Bronze'
+    SELECT [user_id], 500, N'Silver'
     FROM inserted;
 END;
 GO
@@ -420,13 +420,14 @@ INSERT INTO [Identity].[Users] (
     ('0945678901', 'd.pham@email.com',    'HASH_DEMO', N'Phạm Thị D',    N'Quận 7',           'Verified', 'Locked');
 GO
 
--- Cập nhật điểm demo (Profile 850 / Gold; Admin table 920, 500...)
-UPDATE S SET S.[current_point] = 850, S.[rank_level] = N'Gold'
+-- Cập nhật điểm demo — hạng khớp công thức trigger:
+-- Bronze <300 | Silver 300–599 | Gold 600–849 | Diamond >=850
+UPDATE S SET S.[current_point] = 850, S.[rank_level] = N'Diamond'
 FROM [Reputation].[Scores] S
 INNER JOIN [Identity].[Users] U ON U.[user_id] = S.[user_id]
 WHERE U.[email] = 'an.nguyen@email.com';
 
-UPDATE S SET S.[current_point] = 500, S.[rank_level] = N'Bronze'
+UPDATE S SET S.[current_point] = 500, S.[rank_level] = N'Silver'
 FROM [Reputation].[Scores] S
 INNER JOIN [Identity].[Users] U ON U.[user_id] = S.[user_id]
 WHERE U.[email] = 'b.tran@email.com';
@@ -469,6 +470,14 @@ INSERT INTO [Market].[Products] (
     N'Quận 1, TP. Hồ Chí Minh', '/uploads/products/iphone13.jpg',
     @SellerAn, @CatDienTu
 );
+
+INSERT INTO [Market].[Product_Images] ([product_id], [image_url], [sort_order])
+SELECT p.[product_id], '/uploads/products/iphone13.jpg', 0
+FROM [Market].[Products] p
+WHERE p.[title] LIKE N'iPhone 13%'
+  AND NOT EXISTS (
+    SELECT 1 FROM [Market].[Product_Images] i WHERE i.[product_id] = p.[product_id]
+  );
 GO
 
 -- Báo cáo vi phạm demo (Admin — cột phải)
@@ -491,7 +500,7 @@ GO
 INSERT INTO [Identity].[Users] ([phone_number], [email], [password_hash])
 VALUES ('0911223344', 'test.trigger@email.com', 'matkhau123_hash');
 
-SELECT * FROM [Reputation].[Scores];  -- Mong đợi: 500, Bronze
+SELECT * FROM [Reputation].[Scores];  -- Mong đợi: 500, Silver
 
 DECLARE @Uid BIGINT = (SELECT [user_id] FROM [Identity].[Users] WHERE [email] = 'test.trigger@email.com');
 
@@ -520,7 +529,3 @@ SELECT
     [account_status],
     [is_admin]
 FROM [Identity].[Users];
-
-
-
-

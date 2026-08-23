@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:http/http.dart' as http;
 import 'package:safemarket_app/services/api_config.dart';
 import 'package:safemarket_app/services/auth_service.dart';
 
@@ -67,35 +66,34 @@ class FollowService {
 
   Map<String, String> get _headers {
     final token = AuthService.instance.accessToken;
-    return {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      if (token != null) 'Authorization': 'Bearer $token',
-    };
+    return ApiConfig.jsonHeaders(token: token);
   }
 
   Future<void> follow(int userId) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/follows/$userId');
-    final res =
-        await http.post(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpPost(
+      '/follows/$userId',
+      headers: _headers,
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception('Không theo dõi được người này');
     }
   }
 
   Future<void> unfollow(int userId) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/follows/$userId');
-    final res =
-        await http.delete(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpDelete(
+      '/follows/$userId',
+      headers: _headers,
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception('Không bỏ theo dõi được');
     }
   }
 
   Future<FollowStatus> getStatus(int userId) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/follows/$userId/status');
-    final res =
-        await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpGet(
+      '/follows/$userId/status',
+      headers: _headers,
+    );
     if (res.statusCode != 200) {
       return const FollowStatus(
         following: false,
@@ -109,9 +107,10 @@ class FollowService {
   }
 
   Future<List<FollowUserItem>> listFollowers(int userId) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/follows/$userId/followers');
-    final res =
-        await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpGet(
+      '/follows/$userId/followers',
+      headers: _headers,
+    );
     if (res.statusCode != 200) {
       throw Exception('Không tải được danh sách người theo dõi');
     }
@@ -124,9 +123,10 @@ class FollowService {
   }
 
   Future<List<FollowUserItem>> listFollowing(int userId) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/follows/$userId/following');
-    final res =
-        await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpGet(
+      '/follows/$userId/following',
+      headers: _headers,
+    );
     if (res.statusCode != 200) {
       throw Exception('Không tải được danh sách đang theo dõi');
     }

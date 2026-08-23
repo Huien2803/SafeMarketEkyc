@@ -53,6 +53,10 @@ export class Order {
   @Column({ name: 'received_at', type: 'datetime2', nullable: true })
   receivedAt: Date | null;
 
+  /** Thời điểm người bán xác nhận đã giao — mốc tính hạn khiếu nại (3 ngày). */
+  @Column({ name: 'shipped_at', type: 'datetime2', nullable: true })
+  shippedAt: Date | null;
+
   @Column({ name: 'buyer_id', type: 'bigint' })
   buyerId: number;
 

@@ -143,7 +143,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 4),
                 const Text(
-                  'Sau khi đăng ký, bạn được tạo điểm tín nhiệm 500/1000 (hạng Bronze).',
+                  'Sau khi đăng ký, bạn được tạo điểm tín nhiệm 500/1000 (hạng Bạc).',
                   style: TextStyle(
                     fontSize: 13,
                     color: AppColors.textSecondary,

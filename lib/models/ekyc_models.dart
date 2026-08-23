@@ -127,17 +127,24 @@ class FaceMatchResult {
     required this.isMatch,
     required this.similarity,
     required this.message,
+    this.mode,
   });
 
   final bool isMatch;
   final double similarity;
   final String message;
+  final String? mode;
 
-  factory FaceMatchResult.fromJson(Map<String, dynamic> json) => FaceMatchResult(
-        isMatch: json['isMatch'] == true,
-        similarity: (json['similarity'] as num?)?.toDouble() ?? 0,
-        message: (json['message'] ?? '').toString(),
-      );
+  factory FaceMatchResult.fromJson(Map<String, dynamic> json) {
+    var sim = (json['similarity'] as num?)?.toDouble() ?? 0;
+    if (sim > 1) sim = sim / 100;
+    return FaceMatchResult(
+      isMatch: json['isMatch'] == true,
+      similarity: sim,
+      message: (json['message'] ?? '').toString(),
+      mode: json['mode'] as String?,
+    );
+  }
 }
 
 class EkycStatus {

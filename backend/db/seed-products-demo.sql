@@ -11,11 +11,28 @@ DECLARE @CatGiaDung INT = (SELECT [category_id] FROM [Market].[Categories] WHERE
 IF NOT EXISTS (SELECT 1 FROM [Market].[Products] WHERE [title] LIKE N'Sony A7 III%')
 INSERT INTO [Market].[Products] ([title], [description], [price], [condition_pct], [status], [location], [thumbnail_url], [seller_id], [category_id])
 VALUES
-(N'Sony A7 III Body', N'Máy full frame, shutter 15k, kèm pin + sạc. Zin 98%.', 22000000, 95, 'Available', N'Quận 3, TP.HCM', NULL, @SellerC, @CatDienTu),
-(N'MacBook Pro M1 2020', N'RAM 16GB, SSD 512GB. Dùng văn phòng, pin 88%.', 18900000, 88, 'Available', N'Thủ Đức', NULL, @SellerC, @CatDienTu),
-(N'AirPods Pro 2', N'Chính hãng Apple VN, còn bảo hành 3 tháng.', 3200000, 90, 'Available', N'Quận 7', NULL, @SellerB, @CatDienTu),
-(N'Áo khoác Uniqlo Ultra Light', N'Size M, màu navy, mặc 2 lần.', 450000, 98, 'Available', N'Quận 3', NULL, @SellerB, @CatThoiTrang),
-(N'Nồi cơm điện Toshiba 1.8L', N'Dùng 1 năm, còn tốt, kèm xửng hấp.', 650000, 85, 'Available', N'Quận 7', NULL, @SellerB, @CatGiaDung);
+(N'Sony A7 III Body', N'Máy full frame, shutter 15k, kèm pin + sạc. Zin 98%.', 22000000, 95, 'Available', N'Quận 3, TP.HCM', '/uploads/products/sony-a7iii.jpg', @SellerC, @CatDienTu),
+(N'MacBook Pro M1 2020', N'RAM 16GB, SSD 512GB. Dùng văn phòng, pin 88%.', 18900000, 88, 'Available', N'Thủ Đức', '/uploads/products/macbook-m1.jpg', @SellerC, @CatDienTu),
+(N'AirPods Pro 2', N'Chính hãng Apple VN, còn bảo hành 3 tháng.', 3200000, 90, 'Available', N'Quận 7', '/uploads/products/airpods-pro2.jpg', @SellerB, @CatDienTu),
+(N'Áo khoác Uniqlo Ultra Light', N'Size M, màu navy, mặc 2 lần.', 450000, 98, 'Available', N'Quận 3', '/uploads/products/uniqlo-jacket.jpg', @SellerB, @CatThoiTrang),
+(N'Nồi cơm điện Toshiba 1.8L', N'Dùng 1 năm, còn tốt, kèm xửng hấp.', 650000, 85, 'Available', N'Quận 7', '/uploads/products/rice-cooker.jpg', @SellerB, @CatGiaDung);
+GO
+
+-- Ảnh chi tiết (Product_Images)
+INSERT INTO [Market].[Product_Images] ([product_id], [image_url], [sort_order])
+SELECT p.[product_id], p.[thumbnail_url], 0
+FROM [Market].[Products] p
+WHERE p.[thumbnail_url] IS NOT NULL
+  AND p.[title] IN (
+    N'Sony A7 III Body',
+    N'MacBook Pro M1 2020',
+    N'AirPods Pro 2',
+    N'Áo khoác Uniqlo Ultra Light',
+    N'Nồi cơm điện Toshiba 1.8L'
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM [Market].[Product_Images] i WHERE i.[product_id] = p.[product_id]
+  );
 GO
 
 -- Đơn mua demo (Completed) để test lịch sử

@@ -90,7 +90,7 @@ export class ReputationService {
       score = this.scoreRepo.create({
         userId,
         currentPoint: 500,
-        rankLevel: 'Bronze',
+        rankLevel: 'Silver',
       });
       score = await this.scoreRepo.save(score);
     }

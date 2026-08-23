@@ -30,7 +30,7 @@ export interface EkycSessionState {
   faceMatch?: {
     similarity: number;
     isMatch: boolean;
-    mode: 'fpt' | 'attested';
+    mode: 'fpt' | 'vnpt' | 'attested';
     at: number;
   };
   consumed: boolean;
@@ -209,7 +209,7 @@ export class EkycSessionService {
   markFaceMatch(
     userId: number,
     sessionId: string,
-    result: { similarity: number; isMatch: boolean; mode: 'fpt' | 'attested' },
+    result: { similarity: number; isMatch: boolean; mode: 'fpt' | 'vnpt' | 'attested' },
   ): void {
     const s = this.getForUser(userId, sessionId);
     if (!s.liveness) {

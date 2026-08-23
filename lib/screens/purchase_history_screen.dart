@@ -3,8 +3,18 @@ import 'package:safemarket_app/core/constants/app_decorations.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
 import 'package:safemarket_app/models/order.dart';
 import 'package:safemarket_app/services/order_service.dart';
-import 'package:safemarket_app/utils/formatters.dart';
 import 'package:safemarket_app/screens/order_detail_screen.dart';
+
+String _timeAgoVi(DateTime t) {
+  final d = DateTime.now().difference(t);
+  if (d.inMinutes < 1) return 'Vừa xong';
+  if (d.inMinutes < 60) return '${d.inMinutes} phút trước';
+  if (d.inHours < 24) return '${d.inHours} giờ trước';
+  if (d.inDays < 30) return '${d.inDays} ngày trước';
+  final mm = t.month.toString().padLeft(2, '0');
+  final dd = t.day.toString().padLeft(2, '0');
+  return '$dd/$mm/${t.year}';
+}
 
 /// Lịch sử giao dịch — chợ đồ cũ không có giỏ hàng,
 /// mỗi đơn = 1 lần liên hệ mua trực tiếp với người bán.
@@ -156,12 +166,13 @@ class _OrderCard extends StatelessWidget {
   const _OrderCard({
     required this.order,
     required this.counterpartyLabel,
-    required this.counterpartyName,
   });
 
   final OrderItem order;
   final String counterpartyLabel;
-  final String counterpartyName;
+
+  String get _counterpartyName =>
+      counterpartyLabel == 'Người bán' ? order.sellerName : order.buyerName;
 
   Color get _statusColor {
     if (order.isCompleted) return AppColors.trustGreen;
@@ -252,19 +263,13 @@ class _OrderCard extends StatelessWidget {
           _InfoRow(
             icon: Icons.person_outline,
             label: counterpartyLabel,
-            value: order.counterparty.displayName,
-          ),
-          const SizedBox(height: 6),
-          _InfoRow(
-            icon: Icons.phone_outlined,
-            label: 'SĐT',
-            value: order.counterparty.phoneNumber,
+            value: _counterpartyName,
           ),
           const SizedBox(height: 6),
           _InfoRow(
             icon: Icons.access_time,
             label: 'Thời gian',
-            value: timeAgoVi(order.createdAt),
+            value: _timeAgoVi(order.createdAt),
           ),
           if (order.shippingAddress.isNotEmpty) ...[
             const SizedBox(height: 6),

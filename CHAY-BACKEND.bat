@@ -42,16 +42,29 @@ if errorlevel 1 (
   exit /b 1
 )
 
-rem Neu dang chay tren cong 3000 thi tu dung roi start lai (khong hoi Y/N).
-powershell -NoProfile -Command "$c=Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if($c){ Write-Host 'Dang dung process cu tren cong 3000...'; Stop-Process -Id $c.OwningProcess -Force -ErrorAction SilentlyContinue }"
-timeout /t 2 /nobreak >nul
+rem --- Giai phong cong 3000 (tranh loi EADDRINUSE) ---
+call :FreePort3000
+if errorlevel 1 (
+  echo.
+  echo [LOI] Cong 3000 van bi chiem. Mo Task Manager ^> End task cac "Node.js".
+  pause
+  exit /b 1
+)
+
+rem --- Tu dong: firewall + IP LAN + adb reverse ---
+echo [..] Chuan bi ket noi dien thoai...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%BACKEND%\scripts\dev-phone-setup.ps1"
+echo.
 
 echo Dang bat backend...
-echo API:     http://localhost:3000/api
-echo Swagger: http://localhost:3000/api/docs
+echo API PC:       http://localhost:3000/api
+echo Config app:   http://localhost:3000/api/dev/client-config
 echo.
-echo GIU CUA SO NAY MO khi dung app.
-echo Tat backend: Ctrl+C
+echo Sau khi backend len, app dien thoai tu dong thu:
+echo   - 127.0.0.1:3000 ^(adb reverse^)
+echo   - IP WiFi PC   ^(cung mang 192.168.x.x^)
+echo.
+echo GIU CUA SO NAY MO khi dung app. Tat: Ctrl+C
 echo ----------------------------------------
 echo.
 
@@ -61,3 +74,21 @@ echo.
 echo Backend da dung.
 pause
 exit /b 0
+
+:FreePort3000
+echo [..] Kiem tra cong 3000...
+set "TRIES=0"
+:KillLoop
+set /a TRIES+=1
+set "FOUND=0"
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do (
+  set "FOUND=1"
+  echo [..] Dang tat process PID %%P tren cong 3000...
+  taskkill /F /PID %%P >nul 2>&1
+)
+if "%FOUND%"=="0" exit /b 0
+timeout /t 2 /nobreak >nul
+netstat -ano | findstr ":3000" | findstr "LISTENING" >nul 2>&1
+if errorlevel 1 exit /b 0
+if %TRIES% GEQ 5 exit /b 1
+goto KillLoop

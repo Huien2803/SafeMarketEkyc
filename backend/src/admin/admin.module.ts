@@ -16,6 +16,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { ReputationModule } from '../reputation/reputation.module';
+import { EkycModule } from '../ekyc/ekyc.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { ReputationModule } from '../reputation/reputation.module';
     PaymentsModule,
     WalletModule,
     ReputationModule,
+    EkycModule,
   ],
   controllers: [AdminController],
   providers: [AdminService, AdminGuard],

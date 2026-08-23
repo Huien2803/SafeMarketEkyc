@@ -46,8 +46,7 @@ class ProductService {
   }
 
   Future<List<ProductCategory>> getCategories() async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/products/categories');
-    final res = await http.get(uri).timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpGet('/products/categories');
     if (res.statusCode != 200) {
       throw Exception('Không tải danh mục (${res.statusCode})');
     }
@@ -85,9 +84,10 @@ class ProductService {
     if (filters.sort != ProductSort.newest) {
       query['sort'] = filters.sort.apiValue;
     }
-    final uri = Uri.parse('${ApiConfig.baseUrl}/products')
-        .replace(queryParameters: query.isEmpty ? null : query);
-    final res = await http.get(uri).timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpGet(
+      '/products',
+      query: query.isEmpty ? null : query,
+    );
     if (res.statusCode != 200) {
       final hint = _httpErrorHint(res);
       throw Exception('Không tải được sản phẩm (${res.statusCode})$hint');
@@ -99,8 +99,7 @@ class ProductService {
   }
 
   Future<ProductDetail> getProductDetail(int id) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/products/$id');
-    final res = await http.get(uri).timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpGet('/products/$id');
     if (res.statusCode == 404) {
       throw Exception('Sản phẩm không tồn tại');
     }
@@ -130,22 +129,24 @@ class ProductService {
       throw Exception('Cần ít nhất 1 ảnh sản phẩm');
     }
 
-    final uri = Uri.parse('${ApiConfig.baseUrl}/products');
-    final req = http.MultipartRequest('POST', uri)
-      ..headers['Authorization'] = 'Bearer $token'
-      ..fields['title'] = title
-      ..fields['description'] = description
-      ..fields['price'] = '$price'
-      ..fields['conditionPct'] = '$conditionPct'
-      ..fields['location'] = location
-      ..fields['categoryId'] = '$categoryId';
+    final res = await ApiConfig.withFailover((base) async {
+      final uri = Uri.parse('$base/products');
+      final req = http.MultipartRequest('POST', uri)
+        ..headers['Authorization'] = 'Bearer $token'
+        ..fields['title'] = title
+        ..fields['description'] = description
+        ..fields['price'] = '$price'
+        ..fields['conditionPct'] = '$conditionPct'
+        ..fields['location'] = location
+        ..fields['categoryId'] = '$categoryId';
 
-    for (final image in images) {
-      req.files.add(await _imagePart(image));
-    }
+      for (final image in images) {
+        req.files.add(await _imagePart(image));
+      }
 
-    final streamed = await req.send().timeout(const Duration(seconds: 120));
-    final res = await http.Response.fromStream(streamed);
+      final streamed = await req.send().timeout(const Duration(seconds: 120));
+      return http.Response.fromStream(streamed);
+    });
     final body = res.body.isNotEmpty
         ? jsonDecode(res.body) as Map<String, dynamic>
         : <String, dynamic>{};
@@ -168,7 +169,6 @@ class ProductService {
     final token = AuthService.instance.accessToken;
     if (token == null) throw Exception('Cần đăng nhập');
 
-    final uri = Uri.parse('${ApiConfig.baseUrl}/products/$id');
     final body = <String, dynamic>{};
     if (title != null) body['title'] = title;
     if (description != null) body['description'] = description;
@@ -177,16 +177,11 @@ class ProductService {
     if (location != null) body['location'] = location;
     if (categoryId != null) body['categoryId'] = categoryId;
 
-    final res = await http
-        .put(
-          uri,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $token',
-          },
-          body: jsonEncode(body),
-        )
-        .timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpPut(
+      '/products/$id',
+      headers: ApiConfig.jsonHeaders(token: token),
+      body: ApiConfig.encodeBody(body),
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_messageFromBody(res.body, 'Không cập nhật được sản phẩm'));
     }
@@ -195,11 +190,10 @@ class ProductService {
   Future<void> hideProduct(int id) async {
     final token = AuthService.instance.accessToken;
     if (token == null) throw Exception('Cần đăng nhập');
-    final uri = Uri.parse('${ApiConfig.baseUrl}/products/$id/hide');
-    final res = await http.post(
-      uri,
+    final res = await ApiConfig.httpPost(
+      '/products/$id/hide',
       headers: {'Authorization': 'Bearer $token'},
-    ).timeout(ApiConfig.timeout);
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_messageFromBody(res.body, 'Không ẩn được sản phẩm'));
     }
@@ -208,11 +202,10 @@ class ProductService {
   Future<void> unhideProduct(int id) async {
     final token = AuthService.instance.accessToken;
     if (token == null) throw Exception('Cần đăng nhập');
-    final uri = Uri.parse('${ApiConfig.baseUrl}/products/$id/unhide');
-    final res = await http.post(
-      uri,
+    final res = await ApiConfig.httpPost(
+      '/products/$id/unhide',
       headers: {'Authorization': 'Bearer $token'},
-    ).timeout(ApiConfig.timeout);
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_messageFromBody(res.body, 'Không hiện lại được sản phẩm'));
     }
@@ -221,11 +214,10 @@ class ProductService {
   Future<void> deleteProduct(int id) async {
     final token = AuthService.instance.accessToken;
     if (token == null) throw Exception('Cần đăng nhập');
-    final uri = Uri.parse('${ApiConfig.baseUrl}/products/$id');
-    final res = await http.delete(
-      uri,
+    final res = await ApiConfig.httpDelete(
+      '/products/$id',
       headers: {'Authorization': 'Bearer $token'},
-    ).timeout(ApiConfig.timeout);
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_messageFromBody(res.body, 'Không xóa được sản phẩm'));
     }

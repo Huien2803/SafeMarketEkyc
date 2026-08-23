@@ -14,10 +14,6 @@ class ChatUploadService {
     final token = AuthService.instance.accessToken;
     if (token == null) throw Exception('Cần đăng nhập');
 
-    final uri = Uri.parse('${ApiConfig.baseUrl}/chat/upload-image');
-    final req = http.MultipartRequest('POST', uri)
-      ..headers['Authorization'] = 'Bearer $token';
-
     final bytes = await image.readAsBytes();
     final name = image.name.toLowerCase();
     final mime = name.endsWith('.png')
@@ -25,17 +21,23 @@ class ChatUploadService {
         : name.endsWith('.webp')
             ? MediaType('image', 'webp')
             : MediaType('image', 'jpeg');
-    req.files.add(
-      http.MultipartFile.fromBytes(
-        'image',
-        bytes,
-        filename: image.name.isEmpty ? 'chat.jpg' : image.name,
-        contentType: mime,
-      ),
-    );
 
-    final streamed = await req.send().timeout(const Duration(seconds: 60));
-    final res = await http.Response.fromStream(streamed);
+    final res = await ApiConfig.withFailover((base) async {
+      final uri = Uri.parse('$base/chat/upload-image');
+      final req = http.MultipartRequest('POST', uri)
+        ..headers['Authorization'] = 'Bearer $token'
+        ..files.add(
+          http.MultipartFile.fromBytes(
+            'image',
+            bytes,
+            filename: image.name.isEmpty ? 'chat.jpg' : image.name,
+            contentType: mime,
+          ),
+        );
+      final streamed = await req.send().timeout(const Duration(seconds: 60));
+      return http.Response.fromStream(streamed);
+    });
+
     final body = res.body.isNotEmpty
         ? jsonDecode(res.body) as Map<String, dynamic>
         : <String, dynamic>{};

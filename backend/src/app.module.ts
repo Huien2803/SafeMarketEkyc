@@ -35,6 +35,7 @@ import { WalletTransaction } from './entities/wallet-transaction.entity';
 import { Withdrawal } from './entities/withdrawal.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { WalletModule } from './wallet/wallet.module';
+import { DevModule } from './dev/dev.module';
 
 @Module({
   imports: [
@@ -93,9 +94,18 @@ import { WalletModule } from './wallet/wallet.module';
             trustServerCertificate:
               config.get<string>('DB_TRUST_SERVER_CERT', 'true') === 'true',
             enableArithAbort: true,
+            connectTimeout: 15_000,
+            requestTimeout: 30_000,
           },
           extra: {
             trustServerCertificate: true,
+            connectionTimeout: 15_000,
+            requestTimeout: 30_000,
+            pool: {
+              max: 10,
+              min: 2,
+              idleTimeoutMillis: 30_000,
+            },
           },
         };
       },
@@ -113,6 +123,7 @@ import { WalletModule } from './wallet/wallet.module';
     NotificationsModule,
     PaymentsModule,
     WalletModule,
+    DevModule,
   ],
   providers: [
     {

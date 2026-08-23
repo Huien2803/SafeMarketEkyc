@@ -11,6 +11,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { User } from '../entities/user.entity';
+import { SubmitReviewDto } from './dto/submit-review.dto';
 import { ReviewsService } from './reviews.service';
 
 @ApiTags('reviews')
@@ -21,15 +22,12 @@ export class ReviewsController {
   @Post()
   @ApiBearerAuth('JWT-auth')
   @UseGuards(AuthGuard('jwt'))
-  submit(
-    @CurrentUser() user: User,
-    @Body() body: { orderId: number; rating: number; comment?: string },
-  ) {
+  submit(@CurrentUser() user: User, @Body() dto: SubmitReviewDto) {
     return this.reviewsService.submit(
       Number(user.userId),
-      body.orderId,
-      body.rating,
-      body.comment,
+      dto.orderId,
+      dto.rating,
+      dto.comment,
     );
   }
 

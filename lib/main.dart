@@ -14,8 +14,8 @@ import 'package:safemarket_app/screens/profile_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Tự dò địa chỉ server backend phù hợp với thiết bị đang chạy.
-  await ApiConfig.resolveBaseUrl();
+  ApiConfig.resetCache();
+  await ApiConfig.resolveBaseUrl(force: true);
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,

@@ -1,14 +1,8 @@
 import 'dart:convert';
 
-
-
 import 'package:http/http.dart' as http;
-
 import 'package:safemarket_app/services/api_config.dart';
-
 import 'package:safemarket_app/services/auth_service.dart';
-
-
 
 class AdminStats {
   const AdminStats({
@@ -86,86 +80,47 @@ class EkycTrendPoint {
   }
 }
 
-
-
 class AdminUserRow {
-
   const AdminUserRow({
-
     required this.userId,
-
     required this.email,
-
     required this.displayName,
-
     required this.kycStatus,
-
     required this.accountStatus,
-
     required this.trustScore,
-
     required this.rankLevel,
-
     this.orders = 0,
-
     this.lockedUntil,
-
   });
 
-
-
   final int userId;
-
   final String email;
-
   final String? displayName;
-
   final String kycStatus;
-
   final String accountStatus;
-
   final int trustScore;
-
   final String rankLevel;
-
   final int orders;
 
   /// Thời điểm hết hạn đình chỉ tạm thời (null nếu không đình chỉ có hạn).
   final DateTime? lockedUntil;
 
-
-
   factory AdminUserRow.fromJson(Map<String, dynamic> json) {
-
     return AdminUserRow(
-
       userId: (json['userId'] as num).toInt(),
-
       email: json['email'] as String,
-
       displayName: json['displayName'] as String? ?? json['name'] as String?,
-
       kycStatus: json['kycStatus'] as String? ?? 'Unverified',
-
       accountStatus: json['accountStatus'] as String? ?? 'Active',
-
       trustScore: (json['trustScore'] as num?)?.toInt() ?? 0,
-
       rankLevel: json['rankLevel'] as String? ?? 'Bronze',
-
       orders: (json['orders'] as num?)?.toInt() ?? 0,
-
       lockedUntil: json['lockedUntil'] != null
           ? DateTime.tryParse(json['lockedUntil'] as String)
           : null,
-
     );
-
   }
-
 }
-
-
 
 class AdminRankRow {
   const AdminRankRow({
@@ -209,18 +164,19 @@ class AdminRankRow {
 }
 
 class AdminService {
-
   AdminService._();
-
   static final AdminService instance = AdminService._();
-
-
 
   Map<String, String> get _headers => AuthService.instance.authHeaders;
 
-  Future<http.Response> _authGet(Uri uri) =>
+  Future<http.Response> _authGet(String path, {Map<String, String>? query}) =>
       AuthService.instance.authorizedRequest(
-        (h) => http.get(uri, headers: h).timeout(ApiConfig.timeout),
+        (h) => ApiConfig.httpGet(path, query: query, headers: h),
+      );
+
+  Future<http.Response> _authPost(String path, {Object? body}) =>
+      AuthService.instance.authorizedRequest(
+        (h) => ApiConfig.httpPost(path, headers: h, body: body),
       );
 
   String _errorFromResponse(http.Response res, String fallback) {
@@ -235,11 +191,8 @@ class AdminService {
     return '$fallback (${res.statusCode})';
   }
 
-
-
   Future<AdminStats> getStats() async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/stats');
-    final res = await _authGet(uri);
+    final res = await _authGet('/admin/stats');
     if (res.statusCode == 401) {
       throw Exception('Phiên đăng nhập hết hạn — vui lòng đăng nhập lại');
     }
@@ -252,35 +205,25 @@ class AdminService {
     return AdminStats.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
-
-
   Future<List<AdminUserRow>> getUsers() async {
-
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users');
-
-    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
-
+    final res = await ApiConfig.httpGet('/admin/users', headers: _headers);
     if (res.statusCode != 200) return [];
-
     final list = jsonDecode(res.body) as List<dynamic>;
-
     return list
-
         .map((e) => AdminUserRow.fromJson(e as Map<String, dynamic>))
-
         .toList();
-
   }
-
-
 
   /// Xếp hạng người dùng theo điểm tín nhiệm.
   /// [descending] = true: cao → thấp (mặc định); false: thấp → cao.
   /// Người đã xác thực eKYC luôn xếp trên người chưa xác thực.
   Future<List<AdminRankRow>> getUserRanking({bool descending = true}) async {
     final order = descending ? 'desc' : 'asc';
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/ranking?order=$order');
-    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpGet(
+      '/admin/users/ranking',
+      query: {'order': order},
+      headers: _headers,
+    );
     if (res.statusCode != 200) {
       throw Exception(_errorFromResponse(res, 'Không tải được bảng xếp hạng'));
     }
@@ -290,85 +233,63 @@ class AdminService {
   }
 
   Future<List<Map<String, dynamic>>> getReports() async {
-
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/reports');
-
-    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
-
+    final res = await ApiConfig.httpGet('/admin/reports', headers: _headers);
     if (res.statusCode != 200) return [];
-
     return (jsonDecode(res.body) as List<dynamic>)
-
         .map((e) => e as Map<String, dynamic>)
-
         .toList();
-
   }
-
-
 
   Future<List<Map<String, dynamic>>> getPendingEkyc() async {
-
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/ekyc/pending');
-
-    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
-
+    // eKYC pending có thể chậm — giữ timeout dài hơn httpGet mặc định.
+    final res = await ApiConfig.withFailover(
+      (base) => http
+          .get(
+            Uri.parse('$base/admin/ekyc/pending'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 60)),
+    );
     if (res.statusCode != 200) return [];
-
     return (jsonDecode(res.body) as List<dynamic>)
-
         .map((e) => e as Map<String, dynamic>)
-
         .toList();
-
   }
-
-
 
   Future<List<Map<String, dynamic>>> getLockedUsers() async {
-
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/locked');
-
-    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
-
+    final res =
+        await ApiConfig.httpGet('/admin/users/locked', headers: _headers);
     if (res.statusCode != 200) return [];
-
     return (jsonDecode(res.body) as List<dynamic>)
-
         .map((e) => e as Map<String, dynamic>)
-
         .toList();
-
   }
 
-
-
   Future<void> approveEkyc(int userId) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/ekyc/$userId/approve');
-    final res = await http.post(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpPost(
+      '/admin/ekyc/$userId/approve',
+      headers: _headers,
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không phê duyệt được eKYC'));
     }
   }
 
   Future<void> rejectEkyc(int userId, String reason) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/ekyc/$userId/reject');
-    final res = await http
-        .post(uri, headers: _headers, body: jsonEncode({'reason': reason}))
-        .timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpPost(
+      '/admin/ekyc/$userId/reject',
+      headers: _headers,
+      body: ApiConfig.encodeBody({'reason': reason}),
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không từ chối được eKYC'));
     }
   }
 
-
-
   Future<void> warnUser(int userId, {String reason = 'Vi phạm quy định'}) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/warn');
-    final res = await AuthService.instance.authorizedRequest(
-      (h) => http
-          .post(uri, headers: h, body: jsonEncode({'reason': reason}))
-          .timeout(ApiConfig.timeout),
+    final res = await _authPost(
+      '/admin/users/$userId/warn',
+      body: ApiConfig.encodeBody({'reason': reason}),
     );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không gửi được cảnh cáo'));
@@ -380,15 +301,9 @@ class AdminService {
     required int days,
     String reason = 'Vi phạm quy định',
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/suspend');
-    final res = await AuthService.instance.authorizedRequest(
-      (h) => http
-          .post(
-            uri,
-            headers: h,
-            body: jsonEncode({'days': days, 'reason': reason}),
-          )
-          .timeout(ApiConfig.timeout),
+    final res = await _authPost(
+      '/admin/users/$userId/suspend',
+      body: ApiConfig.encodeBody({'days': days, 'reason': reason}),
     );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không đình chỉ được tài khoản'));
@@ -396,11 +311,9 @@ class AdminService {
   }
 
   Future<void> lockUser(int userId, {String reason = 'Vi phạm'}) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/lock');
-    final res = await AuthService.instance.authorizedRequest(
-      (h) => http
-          .post(uri, headers: h, body: jsonEncode({'reason': reason}))
-          .timeout(ApiConfig.timeout),
+    final res = await _authPost(
+      '/admin/users/$userId/lock',
+      body: ApiConfig.encodeBody({'reason': reason}),
     );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không khóa được tài khoản'));
@@ -408,11 +321,9 @@ class AdminService {
   }
 
   Future<void> banUser(int userId, {String reason = 'Cấm vĩnh viễn'}) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/ban');
-    final res = await AuthService.instance.authorizedRequest(
-      (h) => http
-          .post(uri, headers: h, body: jsonEncode({'reason': reason}))
-          .timeout(ApiConfig.timeout),
+    final res = await _authPost(
+      '/admin/users/$userId/ban',
+      body: ApiConfig.encodeBody({'reason': reason}),
     );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không cấm được tài khoản'));
@@ -424,15 +335,9 @@ class AdminService {
     required int points,
     String reason = 'Vi phạm quy định',
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/punish');
-    final res = await AuthService.instance.authorizedRequest(
-      (h) => http
-          .post(
-            uri,
-            headers: h,
-            body: jsonEncode({'points': points, 'reason': reason}),
-          )
-          .timeout(ApiConfig.timeout),
+    final res = await _authPost(
+      '/admin/users/$userId/punish',
+      body: ApiConfig.encodeBody({'points': points, 'reason': reason}),
     );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không trừ điểm được'));
@@ -442,10 +347,7 @@ class AdminService {
   /// Xóa tài khoản. Trả về `'hard'` nếu xóa cứng hoàn toàn, `'soft'` nếu
   /// xóa mềm (ẩn danh + ẩn sản phẩm, giữ lịch sử giao dịch).
   Future<String> deleteUser(int userId) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/delete');
-    final res = await AuthService.instance.authorizedRequest(
-      (h) => http.post(uri, headers: h).timeout(ApiConfig.timeout),
-    );
+    final res = await _authPost('/admin/users/$userId/delete');
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không xóa được tài khoản'));
     }
@@ -457,46 +359,35 @@ class AdminService {
   }
 
   Future<void> unlockUser(int userId) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/users/$userId/unlock');
-    final res = await AuthService.instance.authorizedRequest(
-      (h) => http.post(uri, headers: h).timeout(ApiConfig.timeout),
-    );
+    final res = await _authPost('/admin/users/$userId/unlock');
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không mở khóa được tài khoản'));
     }
   }
 
-
-
   Future<void> hideProduct(int productId) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/products/$productId/hide');
-    final res = await http.post(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpPost(
+      '/admin/products/$productId/hide',
+      headers: _headers,
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không ẩn được sản phẩm'));
     }
   }
 
   Future<void> resolveReport(int reportId, {String status = 'Resolved'}) async {
-
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/reports/$reportId/resolve');
-
-    final res = await http
-
-        .post(uri, headers: _headers, body: jsonEncode({'status': status}))
-
-        .timeout(ApiConfig.timeout);
-
+    final res = await ApiConfig.httpPost(
+      '/admin/reports/$reportId/resolve',
+      headers: _headers,
+      body: ApiConfig.encodeBody({'status': status}),
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
-
       throw Exception('Không xử lý được báo cáo');
-
     }
-
   }
 
   Future<List<Map<String, dynamic>>> getDisputes() async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/disputes');
-    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpGet('/admin/disputes', headers: _headers);
     if (res.statusCode != 200) return [];
     return (jsonDecode(res.body) as List<dynamic>)
         .map((e) => e as Map<String, dynamic>)
@@ -510,20 +401,16 @@ class AdminService {
     int penaltyPoints = 50,
     bool skipPenalty = false,
   }) async {
-    final uri =
-        Uri.parse('${ApiConfig.baseUrl}/admin/disputes/$orderId/resolve');
-    final res = await http
-        .post(
-          uri,
-          headers: _headers,
-          body: jsonEncode({
-            'decision': decision,
-            if (note != null && note.isNotEmpty) 'note': note,
-            'penaltyPoints': penaltyPoints,
-            'skipPenalty': skipPenalty,
-          }),
-        )
-        .timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpPost(
+      '/admin/disputes/$orderId/resolve',
+      headers: _headers,
+      body: ApiConfig.encodeBody({
+        'decision': decision,
+        if (note != null && note.isNotEmpty) 'note': note,
+        'penaltyPoints': penaltyPoints,
+        'skipPenalty': skipPenalty,
+      }),
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không xử lý được khiếu nại'));
     }
@@ -532,10 +419,11 @@ class AdminService {
   Future<List<Map<String, dynamic>>> getWithdrawals({
     String status = 'Pending',
   }) async {
-    final uri = Uri.parse(
-      '${ApiConfig.baseUrl}/admin/withdrawals?status=$status',
+    final res = await ApiConfig.httpGet(
+      '/admin/withdrawals',
+      query: {'status': status},
+      headers: _headers,
     );
-    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
     if (res.statusCode != 200) return [];
     return (jsonDecode(res.body) as List<dynamic>)
         .map((e) => e as Map<String, dynamic>)
@@ -543,33 +431,24 @@ class AdminService {
   }
 
   Future<void> approveWithdrawal(int id, {String? note}) async {
-    final uri =
-        Uri.parse('${ApiConfig.baseUrl}/admin/withdrawals/$id/approve');
-    final res = await http
-        .post(
-          uri,
-          headers: _headers,
-          body: jsonEncode({if (note != null) 'note': note}),
-        )
-        .timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpPost(
+      '/admin/withdrawals/$id/approve',
+      headers: _headers,
+      body: ApiConfig.encodeBody({if (note != null) 'note': note}),
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không duyệt được lệnh rút'));
     }
   }
 
   Future<void> rejectWithdrawal(int id, {String? note}) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/admin/withdrawals/$id/reject');
-    final res = await http
-        .post(
-          uri,
-          headers: _headers,
-          body: jsonEncode({if (note != null) 'note': note}),
-        )
-        .timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpPost(
+      '/admin/withdrawals/$id/reject',
+      headers: _headers,
+      body: ApiConfig.encodeBody({if (note != null) 'note': note}),
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(_errorFromResponse(res, 'Không từ chối được lệnh rút'));
     }
   }
-
 }
-

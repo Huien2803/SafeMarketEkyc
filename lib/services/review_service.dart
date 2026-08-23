@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:http/http.dart' as http;
 import 'package:safemarket_app/models/review.dart';
 import 'package:safemarket_app/services/api_config.dart';
 import 'package:safemarket_app/services/auth_service.dart';
@@ -11,11 +10,7 @@ class ReviewService {
 
   Map<String, String> get _headers {
     final token = AuthService.instance.accessToken;
-    return {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-      if (token != null) 'Authorization': 'Bearer $token',
-    };
+    return ApiConfig.jsonHeaders(token: token);
   }
 
   Future<ReviewItem> submitReview({
@@ -23,28 +18,36 @@ class ReviewService {
     required int rating,
     String? comment,
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/reviews');
-    final res = await http
-        .post(
-          uri,
-          headers: _headers,
-          body: jsonEncode({
-            'orderId': orderId,
-            'rating': rating,
-            if (comment != null && comment.isNotEmpty) 'comment': comment,
-          }),
-        )
-        .timeout(ApiConfig.timeout);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final res = await ApiConfig.httpPost(
+      '/reviews',
+      headers: _headers,
+      body: ApiConfig.encodeBody({
+        'orderId': orderId,
+        'rating': rating,
+        if (comment != null && comment.isNotEmpty) 'comment': comment,
+      }),
+    );
+    final body = jsonDecode(res.body);
     if (res.statusCode >= 200 && res.statusCode < 300) {
-      return ReviewItem.fromJson(body);
+      return ReviewItem.fromJson(body as Map<String, dynamic>);
     }
-    throw Exception(body['message'] ?? 'Không gửi được đánh giá');
+    throw Exception(_messageFromBody(body));
+  }
+
+  String _messageFromBody(dynamic body) {
+    if (body is Map<String, dynamic>) {
+      final msg = body['message'];
+      if (msg is List) return msg.join(', ');
+      if (msg is String && msg.isNotEmpty) return msg;
+    }
+    return 'Không gửi được đánh giá (${body is Map ? body.toString() : 'lỗi API'})';
   }
 
   Future<OrderReviewStatus> getOrderReviewStatus(int orderId) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/reviews/order/$orderId/status');
-    final res = await http.get(uri, headers: _headers).timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpGet(
+      '/reviews/order/$orderId/status',
+      headers: _headers,
+    );
     if (res.statusCode != 200) {
       return const OrderReviewStatus(
         canReview: false,
@@ -60,8 +63,7 @@ class ReviewService {
   }
 
   Future<List<ReviewItem>> getUserReviews(int userId) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/reviews/user/$userId');
-    final res = await http.get(uri).timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpGet('/reviews/user/$userId');
     if (res.statusCode != 200) return [];
     return (jsonDecode(res.body) as List<dynamic>)
         .map((e) => ReviewItem.fromJson(e as Map<String, dynamic>))

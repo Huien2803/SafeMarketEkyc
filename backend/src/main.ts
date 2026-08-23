@@ -10,6 +10,8 @@ import { ensureProductUploadDir } from './products/product-upload.config';
 import { ensureChatUploadDir } from './chat/chat-upload.config';
 import { ensureOrderUploadDir } from './orders/order-upload.config';
 import { ensureAvatarUploadDir } from './users/avatar-upload.config';
+import { getLanIPv4 } from './common/utils/lan-host.util';
+import { DevService } from './dev/dev.service';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -128,11 +130,33 @@ async function bootstrap() {
   // 0.0.0.0: cho phép điện thoại cùng WiFi gọi API (không chỉ localhost)
   await app.listen(port, '0.0.0.0');
 
+  const lan = getLanIPv4();
   Logger.log(`SafeMarket API ready at http://localhost:${port}/api`, 'Bootstrap');
+  if (lan) {
+    Logger.log(
+      `Điện thoại (WiFi):  http://${lan}:${port}/api`,
+      'Bootstrap',
+    );
+    Logger.log(
+      `App config:         http://${lan}:${port}/api/dev/client-config`,
+      'Bootstrap',
+    );
+  }
   Logger.log(
-    `LAN (điện thoại): http://<IP-máy-tính>:${port}/api — ipconfig → IPv4`,
+    `Điện thoại (adb):   http://127.0.0.1:${port}/api  (sau adb reverse)`,
     'Bootstrap',
   );
+  if (!isProd) {
+    try {
+      const devService = app.get(DevService);
+      const logs = await devService.runPhoneSetup();
+      for (const line of logs) {
+        Logger.log(line, 'PhoneSetup');
+      }
+    } catch (e) {
+      Logger.warn(`PhoneSetup: ${(e as Error).message}`, 'Bootstrap');
+    }
+  }
   if (enableSwagger) {
     Logger.log(`Swagger UI:        http://localhost:${port}/api/docs`, 'Bootstrap');
   }

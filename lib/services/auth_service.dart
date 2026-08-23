@@ -245,18 +245,15 @@ class AuthService extends ChangeNotifier {
     String path,
     Map<String, dynamic> body,
   ) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}$path');
     try {
-      final response = await http
-          .post(
-            uri,
-            headers: const {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: jsonEncode(body),
-          )
-          .timeout(ApiConfig.timeout);
+      final response = await ApiConfig.httpPost(
+        path,
+        headers: const {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode(body),
+      );
 
       final decoded = response.body.isNotEmpty
           ? jsonDecode(response.body) as Map<String, dynamic>
@@ -272,7 +269,7 @@ class AuthService extends ChangeNotifier {
       rethrow;
     } catch (e) {
       throw AuthException(
-        'Không kết nối được server: $e\nKiểm tra backend đã chạy và URL: $uri',
+        'Không kết nối được server: $e\nCắm USB, backend npm run start:dev, URL: ${ApiConfig.baseUrl}',
       );
     }
   }

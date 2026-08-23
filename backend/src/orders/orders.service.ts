@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { Order } from '../entities/order.entity';
@@ -44,6 +45,7 @@ export class OrdersService {
     private readonly paymentsService: PaymentsService,
     private readonly walletService: WalletService,
     private readonly reputationService: ReputationService,
+    private readonly config: ConfigService,
   ) {}
 
   /**
@@ -304,6 +306,7 @@ export class OrdersService {
       throw new BadRequestException('Chỉ ship khi đơn đã thanh toán');
     }
     order.orderStatus = 'Shipped';
+    order.shippedAt = order.shippedAt ?? new Date();
     await this.orderRepo.save(order);
     return this.toOrderJson(orderId);
   }
@@ -357,6 +360,7 @@ export class OrdersService {
         );
       }
       order.orderStatus = 'Shipped';
+      order.shippedAt = order.shippedAt ?? new Date();
       await this.orderRepo.save(order);
       return this.toOrderJson(orderId);
     }
@@ -366,6 +370,7 @@ export class OrdersService {
     // Tiền mặt + gặp trực tiếp: người bán xác nhận đã giao & nhận tiền
     // → Shipped (chờ người mua chụp ảnh xác nhận nhận hàng).
     order.orderStatus = 'Shipped';
+    order.shippedAt = order.shippedAt ?? new Date();
     await this.orderRepo.save(order);
     return this.toOrderJson(orderId);
   }
@@ -522,6 +527,8 @@ export class OrdersService {
         'Chỉ khiếu nại khi đơn đã thanh toán / đang giao',
       );
     }
+    await this.assertDisputeWithinWindow(order);
+
     order.orderStatus = 'Disputed';
     order.disputeType = dto.type;
     order.disputeNote = dto.note ?? '';
@@ -553,6 +560,37 @@ export class OrdersService {
     }
 
     return this.toOrderJson(orderId);
+  }
+
+  /**
+   * Khiếu nại chỉ trong DISPUTE_WINDOW_DAYS (mặc định 3) kể từ khi giao/thanh toán.
+   * Quá hạn → HTTP 403 Forbidden.
+   */
+  private async assertDisputeWithinWindow(order: Order): Promise<void> {
+    const windowDays = Number(
+      this.config.get<string>('DISPUTE_WINDOW_DAYS', '3'),
+    );
+    if (!Number.isFinite(windowDays) || windowDays <= 0) return;
+
+    let anchor: Date | null = null;
+    if (order.orderStatus === 'Shipped') {
+      anchor = order.shippedAt ?? null;
+    } else if (order.orderStatus === 'Paid') {
+      const payment = await this.paymentRepo.findOne({
+        where: { orderId: order.orderId },
+      });
+      anchor = payment?.paidAt ?? null;
+    }
+    anchor ??= order.createdAt;
+
+    const elapsedDays =
+      (Date.now() - anchor.getTime()) / (1000 * 60 * 60 * 24);
+    if (elapsedDays > windowDays) {
+      throw new ForbiddenException(
+        `Đã quá ${windowDays} ngày kể từ khi người bán giao/thanh toán — ` +
+          'không thể khiếu nại qua app. Vui lòng liên hệ hỗ trợ.',
+      );
+    }
   }
 
   private async requireParticipant(orderId: number, userId: number): Promise<Order> {

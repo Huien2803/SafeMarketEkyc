@@ -718,7 +718,7 @@ Nói hạn chế **có chủ đích** sẽ được điểm trung thực:
 3. Chat Nest SQL tồn tại song song Firebase — nguồn chat chính lúc demo là Firebase.  
 4. Không có recommendation ML / chống gian lận hành vi nâng cao (device fingerprint, graph fraud).  
 5. VNPay/eKYC phụ thuộc cấu hình key môi trường; demo có `simulate-pay` / attested face-match.  
-6. Một số copy UI có thể nhắc phạt hủy −30 trong khi API hủy **không tự trừ** −30 (phạt chủ yếu qua review/dispute/admin) — nếu bị hỏi, nói đúng theo **code API**.
+6. Hủy đơn **không trừ điểm** (API + UI đã khớp). Phạt điểm chủ yếu qua review / dispute / admin.
 
 ---
 

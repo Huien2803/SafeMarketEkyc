@@ -129,7 +129,7 @@ export class ReviewsService {
         this.scoreRepo.create({
           userId: revieweeId,
           currentPoint: 500,
-          rankLevel: 'Bronze',
+          rankLevel: 'Silver',
         }),
       );
     }

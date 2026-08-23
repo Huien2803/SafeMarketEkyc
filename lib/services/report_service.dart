@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:http/http.dart' as http;
 import 'package:safemarket_app/core/constants/report_reasons.dart';
 import 'package:safemarket_app/services/api_config.dart';
 import 'package:safemarket_app/services/auth_service.dart';
@@ -20,23 +19,17 @@ class ReportService {
     if (token == null) throw Exception('Cần đăng nhập để báo cáo');
 
     final cat = reportCategoryByCode(category);
-    final uri = Uri.parse('${ApiConfig.baseUrl}/reports');
-    final res = await http
-        .post(
-          uri,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $token',
-          },
-          body: jsonEncode({
-            'reportedId': reportedId,
-            'category': category,
-            'detail': detail,
-            if (productId != null) 'productId': productId,
-            'severity': severity ?? cat?.severity ?? 'medium',
-          }),
-        )
-        .timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpPost(
+      '/reports',
+      headers: ApiConfig.jsonHeaders(token: token),
+      body: ApiConfig.encodeBody({
+        'reportedId': reportedId,
+        'category': category,
+        'detail': detail,
+        if (productId != null) 'productId': productId,
+        'severity': severity ?? cat?.severity ?? 'medium',
+      }),
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final msg = body['message'];

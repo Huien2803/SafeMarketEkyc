@@ -68,7 +68,7 @@ export class FptAiService {
     }
   }
 
-  private hasRealApiKey(): boolean {
+  hasRealApiKey(): boolean {
     if (!this.apiKey) return false;
     const lower = this.apiKey.toLowerCase();
     return !(
@@ -206,8 +206,9 @@ export class FptAiService {
   }
 
   /**
-   * So khớp khuôn mặt giữa: ảnh chân dung trên CCCD + ảnh selfie chụp trực tiếp.
-   * FPT trả về `similarity` từ 0..1; > 0.8 thường coi là cùng người.
+   * So khớp khuôn mặt: ảnh chân dung trên CCCD vs selfie đang xác thực.
+   * FPT trả `{ code, data: { isMatch, similarity } }` — similarity là % (0..100),
+   * isMatch theo ngưỡng ~80% của FPT.
    */
   async matchFace(
     idCardImage: Express.Multer.File,
@@ -215,8 +216,14 @@ export class FptAiService {
   ): Promise<FaceMatchResult> {
     this.assertApiKeyConfigured();
     const form = new FormData();
-    form.append('file[]', idCardImage.buffer, { filename: 'id.jpg' });
-    form.append('file[]', selfieImage.buffer, { filename: 'selfie.jpg' });
+    form.append('file[]', idCardImage.buffer, {
+      filename: 'id.jpg',
+      contentType: 'image/jpeg',
+    });
+    form.append('file[]', selfieImage.buffer, {
+      filename: 'selfie.jpg',
+      contentType: 'image/jpeg',
+    });
 
     try {
       const res = await axios.post<Record<string, unknown>>(
@@ -226,6 +233,7 @@ export class FptAiService {
           headers: {
             ...form.getHeaders(),
             'api-key': this.apiKey,
+            api_key: this.apiKey,
           },
           maxBodyLength: Infinity,
           timeout: 30_000,
@@ -234,28 +242,70 @@ export class FptAiService {
 
       const body = res.data ?? {};
       const code = String(body.code ?? '');
-      if (code !== '200') {
+      if (code && code !== '200') {
         throw new BadRequestException(
-          `FPT.AI Face Match lỗi: ${body.message ?? 'không rõ'}`,
+          this.faceMatchErrorMessage(code, body),
         );
       }
 
-      const similarity = Number(body.similarity ?? 0);
-      // Ảnh chân dung trên CCCD độ phân giải thấp nên dùng ngưỡng 0.72
-      // (đồng bộ với EkycService.FACE_MATCH_THRESHOLD). FPT có thể trả
-      // isMatch dưới dạng boolean hoặc chuỗi 'true'/'false'.
+      const data =
+        body.data && typeof body.data === 'object' && !Array.isArray(body.data)
+          ? (body.data as Record<string, unknown>)
+          : body;
+
+      const rawSim = Number(
+        data.similarity ?? data.Similarity ?? body.similarity ?? 0,
+      );
+      const similarity = this.normalizeSimilarity(rawSim);
       const fptSaysMatch =
-        body.isMatch === true || String(body.isMatch ?? '') === 'true';
-      const isMatch = fptSaysMatch || similarity >= 0.72;
+        data.isMatch === true ||
+        String(data.isMatch ?? '') === 'true' ||
+        body.isMatch === true ||
+        String(body.isMatch ?? '') === 'true';
+
+      const threshold = Number(
+        this.config.get<string>('EKYC_FACE_MATCH_THRESHOLD', '0.72'),
+      );
+      const isMatch = fptSaysMatch || similarity >= threshold;
+
+      this.logger.log(
+        `FPT Face Match: isMatch=${isMatch} fptFlag=${fptSaysMatch} ` +
+          `similarity=${(similarity * 100).toFixed(1)}% raw=${rawSim}`,
+      );
 
       return {
         isMatch,
         similarity,
-        message: String(body.message ?? ''),
+        message: isMatch
+          ? `Khuôn mặt khớp ảnh CCCD (${(similarity * 100).toFixed(0)}%).`
+          : `Khuôn mặt không khớp ảnh trên CCCD (độ tương đồng ${(similarity * 100).toFixed(0)}%, cần ≥ ${(threshold * 100).toFixed(0)}%).`,
         rawResponse: body,
       };
     } catch (err) {
       this.handleAxiosError(err, 'Face Match');
+    }
+  }
+
+  /** FPT similarity thường là 0..100; nội bộ hệ thống dùng 0..1. */
+  private normalizeSimilarity(raw: number): number {
+    if (!Number.isFinite(raw) || raw < 0) return 0;
+    if (raw > 1) return Math.min(raw / 100, 1);
+    return raw;
+  }
+
+  private faceMatchErrorMessage(
+    code: string,
+    body: Record<string, unknown>,
+  ): string {
+    switch (code) {
+      case '407':
+        return 'FPT.AI không nhận diện được khuôn mặt trên ảnh CCCD hoặc ảnh selfie. Chụp rõ mặt, đủ sáng.';
+      case '408':
+        return 'FPT.AI chỉ nhận ảnh JPG/JPEG. Hãy chụp lại Face ID.';
+      case '409':
+        return 'FPT.AI Face Match cần đúng 2 ảnh (CCCD + selfie).';
+      default:
+        return `FPT.AI Face Match lỗi (${code}): ${body.message ?? 'không rõ'}`;
     }
   }
 

@@ -8,6 +8,7 @@ import 'package:safemarket_app/models/product_filters.dart';
 import 'package:safemarket_app/models/favorite_product.dart';
 import 'package:safemarket_app/models/product.dart';
 import 'package:safemarket_app/services/product_service.dart';
+import 'package:safemarket_app/services/api_config.dart';
 import 'package:safemarket_app/screens/favorites_tab.dart';
 import 'package:safemarket_app/screens/notifications_screen.dart';
 import 'package:safemarket_app/screens/product_detail.dart';
@@ -199,7 +200,6 @@ class _HomeTab extends StatefulWidget {
 class _HomeTabState extends State<_HomeTab>
     with AutomaticKeepAliveClientMixin {
   int _selectedCategoryId = 0;
-  bool _verifiedOnly = false;
   ProductFilters _filters = ProductFilters.empty;
   final _searchCtrl = TextEditingController();
   List<ProductCategory> _apiCategories = [];
@@ -286,11 +286,11 @@ class _HomeTabState extends State<_HomeTab>
       _error = null;
     });
     try {
+      await ApiConfig.resolveBaseUrl(force: true);
       final cats = await ProductService.instance.getCategories();
       final products = await ProductService.instance.getProducts(
         categoryId: _selectedCategoryId == 0 ? null : _selectedCategoryId,
         search: _searchCtrl.text,
-        verifiedOnly: _verifiedOnly,
         filters: _filters,
       );
       if (!mounted) return;
@@ -496,21 +496,6 @@ class _HomeTabState extends State<_HomeTab>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              FilterChip(
-                label: const Text('Chỉ người đã eKYC'),
-                selected: _verifiedOnly,
-                onSelected: (v) {
-                  setState(() => _verifiedOnly = v);
-                  _loadAll();
-                },
-                selectedColor: AppColors.primary.withValues(alpha: 0.15),
-                checkmarkColor: AppColors.primary,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
           Row(
             children: [
               Expanded(

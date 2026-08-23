@@ -107,16 +107,16 @@ export class MailService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     if (!this.transporter) return;
-    try {
-      await this.transporter.verify();
-      this.logger.log('Kết nối SMTP OK — sẵn sàng gửi OTP email.');
-    } catch (err) {
-      this.logger.error(
-        `Không xác minh được SMTP: ${(err as Error).message}. ` +
-          'Kiểm tra App Password Gmail (2FA + App passwords), hoặc tắt "Less secure" không còn dùng được.',
-      );
-      // Giữ transporter — lỗi sẽ hiện khi gửi; tránh crash boot khi mạng tạm lỗi.
-    }
+    // Không await: verify SMTP có thể treo 15–20s và làm API trễ lúc vừa start.
+    void this.transporter
+      .verify()
+      .then(() => this.logger.log('Kết nối SMTP OK — sẵn sàng gửi OTP email.'))
+      .catch((err: Error) => {
+        this.logger.error(
+          `Không xác minh được SMTP: ${err.message}. ` +
+            'Kiểm tra App Password Gmail (2FA + App passwords).',
+        );
+      });
   }
 
   /** true nếu OTP được gửi qua SMTP; false nếu chỉ in console (khi cho phép fallback). */

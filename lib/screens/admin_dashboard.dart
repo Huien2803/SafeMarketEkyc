@@ -3,6 +3,7 @@ import 'package:safemarket_app/core/constants/app_decorations.dart';
 import 'package:safemarket_app/core/theme/app_colors.dart';
 import 'package:safemarket_app/screens/marketplace_home.dart';
 import 'package:safemarket_app/services/admin_service.dart';
+import 'package:safemarket_app/services/api_config.dart';
 import 'package:safemarket_app/services/auth_service.dart';
 import 'package:printing/printing.dart';
 import 'package:safemarket_app/utils/admin_report_pdf.dart';
@@ -873,7 +874,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         kycStatus: 'Unverified',
         accountStatus: 'Active',
         trustScore: 500,
-        rankLevel: 'Bronze',
+        rankLevel: 'Silver',
       );
     }
     await _punishUser(user);
@@ -2295,6 +2296,18 @@ class _PendingEkycCard extends StatelessWidget {
   final void Function(int userId) onApprove;
   final void Function(int userId) onReject;
 
+  static String _str(Map<String, dynamic> e, String key) =>
+      (e[key] as String?)?.trim() ?? '';
+
+  static String _fmtDob(String raw) {
+    if (raw.isEmpty) return '';
+    if (raw.length >= 10) {
+      final ymd = raw.substring(0, 10).split('-');
+      if (ymd.length == 3) return '${ymd[2]}/${ymd[1]}/${ymd[0]}';
+    }
+    return raw;
+  }
+
   @override
   Widget build(BuildContext context) {
     if (loading && items.isEmpty) {
@@ -2335,6 +2348,11 @@ class _PendingEkycCard extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: 4),
+          const Text(
+            'Bấm ảnh để phóng to CCCD và ảnh nhận dạng khuôn mặt.',
+            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+          ),
           const SizedBox(height: 12),
           if (items.isEmpty)
             const Padding(
@@ -2350,80 +2368,195 @@ class _PendingEkycCard extends StatelessWidget {
             ...items.map((e) {
               final userId = (e['userId'] as num).toInt();
               final hasProfile = e['hasProfile'] as bool? ?? true;
-              final fullName = e['fullName'] as String? ?? '';
-              final idNumber = e['idNumber'] as String? ?? '';
-              final displayName = e['displayName'] as String? ?? '';
-              final subtitle = hasProfile &&
-                      (fullName.isNotEmpty || idNumber.isNotEmpty)
-                  ? '$fullName • $idNumber'
-                  : hasProfile
-                      ? 'Đã nộp hồ sơ'
-                      : 'Chưa có file CMND — duyệt theo trạng thái tài khoản';
-              final initial = displayName.trim().isNotEmpty
-                  ? displayName.trim().substring(0, 1).toUpperCase()
+              final fullName = _str(e, 'fullName');
+              final idNumber = _str(e, 'idNumber');
+              final displayName = _str(e, 'displayName');
+              final dob = _fmtDob(_str(e, 'dob'));
+              final address = _str(e, 'address');
+              final frontUrl = ApiConfig.mediaUrl(_str(e, 'idFrontUrl'));
+              final backUrl = ApiConfig.mediaUrl(_str(e, 'idBackUrl'));
+              final faceUrl = ApiConfig.mediaUrl(_str(e, 'faceUrl'));
+              final faceMatchIsMatch = e['faceMatchIsMatch'] as bool?;
+              final faceSimilarity = (e['faceSimilarity'] as num?)?.toDouble();
+              final faceMatchMessage = _str(e, 'faceMatchMessage');
+              final faceMismatch = faceMatchIsMatch == false;
+              final hasImages = frontUrl.isNotEmpty ||
+                  backUrl.isNotEmpty ||
+                  faceUrl.isNotEmpty;
+              final initial = displayName.isNotEmpty
+                  ? displayName.substring(0, 1).toUpperCase()
                   : '?';
               return Container(
-                margin: const EdgeInsets.only(bottom: 10),
-                padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
                 decoration: BoxDecoration(
                   color: AppColors.background,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                  border: Border.all(
+                    color: faceMismatch
+                        ? AppColors.danger
+                        : const Color(0xFFE5E7EB),
+                    width: faceMismatch ? 1.5 : 1,
+                  ),
                 ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    CircleAvatar(
-                      radius: 20,
-                      backgroundColor: const Color(0xFFDBEAFE),
-                      child: Text(
-                        initial,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.primary,
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 20,
+                          backgroundColor: const Color(0xFFDBEAFE),
+                          child: Text(
+                            initial,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                fullName.isNotEmpty ? fullName : displayName,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                [
+                                  if (idNumber.isNotEmpty) 'CCCD $idNumber',
+                                  if (dob.isNotEmpty) 'NS $dob',
+                                  if (!hasProfile) 'Chưa có file CCCD',
+                                ].join(' • '),
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  height: 1.35,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                              if (address.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  address,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.textMuted,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: faceMismatch
+                              ? 'Không duyệt — khuôn mặt không khớp CCCD'
+                              : 'Duyệt',
+                          icon: Icon(
+                            Icons.check_circle_rounded,
+                            color: faceMismatch
+                                ? AppColors.textMuted
+                                : AppColors.trustGreen,
+                          ),
+                          onPressed:
+                              faceMismatch ? null : () => onApprove(userId),
+                        ),
+                        IconButton(
+                          tooltip: 'Từ chối',
+                          icon: const Icon(
+                            Icons.cancel_rounded,
+                            color: AppColors.danger,
+                          ),
+                          onPressed: () => onReject(userId),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    if (faceMatchIsMatch != null) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: faceMismatch
+                              ? const Color(0xFFFEE2E2)
+                              : const Color(0xFFD1FAE5),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          faceMismatch
+                              ? 'KHÔNG KHỚP CCCD — ${(faceSimilarity != null ? '${(faceSimilarity * 100).toStringAsFixed(0)}%' : 'thấp')}'
+                                  '${faceMatchMessage.isNotEmpty ? '\n$faceMatchMessage' : ''}'
+                              : 'Khớp CCCD — ${((faceSimilarity ?? 0) * 100).toStringAsFixed(0)}%',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            height: 1.35,
+                            color: faceMismatch
+                                ? AppColors.danger
+                                : AppColors.trustGreen,
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            displayName,
-                            style: const TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.textPrimary,
-                            ),
+                      const SizedBox(height: 10),
+                    ],
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _EkycEvidenceThumb(
+                            label: 'CCCD mặt trước',
+                            url: frontUrl,
+                            icon: Icons.badge_outlined,
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            subtitle,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              height: 1.35,
-                              color: AppColors.textSecondary,
-                            ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _EkycEvidenceThumb(
+                            label: 'CCCD mặt sau',
+                            url: backUrl,
+                            icon: Icons.credit_card_outlined,
                           ),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _EkycEvidenceThumb(
+                            label: 'Khuôn mặt',
+                            url: faceUrl,
+                            icon: Icons.face_retouching_natural_outlined,
+                          ),
+                        ),
+                      ],
                     ),
-                    IconButton(
-                      tooltip: 'Duyệt',
-                      icon: const Icon(
-                        Icons.check_circle_rounded,
-                        color: AppColors.trustGreen,
+                    if (hasImages)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: () => _openReviewSheet(
+                            context,
+                            fullName: fullName.isNotEmpty
+                                ? fullName
+                                : displayName,
+                            idNumber: idNumber,
+                            dob: dob,
+                            address: address,
+                            frontUrl: frontUrl,
+                            backUrl: backUrl,
+                            faceUrl: faceUrl,
+                          ),
+                          icon: const Icon(Icons.zoom_in, size: 18),
+                          label: const Text('Xem lớn CCCD & khuôn mặt'),
+                        ),
                       ),
-                      onPressed: () => onApprove(userId),
-                    ),
-                    IconButton(
-                      tooltip: 'Từ chối',
-                      icon: const Icon(
-                        Icons.cancel_rounded,
-                        color: AppColors.danger,
-                      ),
-                      onPressed: () => onReject(userId),
-                    ),
                   ],
                 ),
               );
@@ -2432,6 +2565,291 @@ class _PendingEkycCard extends StatelessWidget {
       ),
     );
   }
+
+  static Future<void> _openReviewSheet(
+    BuildContext context, {
+    required String fullName,
+    required String idNumber,
+    required String dob,
+    required String address,
+    required String frontUrl,
+    required String backUrl,
+    required String faceUrl,
+  }) {
+    return showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 920, maxHeight: 720),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.verified_user_outlined,
+                          color: AppColors.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          fullName.isEmpty ? 'Hồ sơ eKYC' : fullName,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Text(
+                    [
+                      if (idNumber.isNotEmpty) 'CCCD: $idNumber',
+                      if (dob.isNotEmpty) 'Ngày sinh: $dob',
+                      if (address.isNotEmpty) address,
+                    ].join('\n'),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      height: 1.4,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final wide = constraints.maxWidth >= 640;
+                        final images = [
+                          _EkycLargeImage(
+                            label: 'CCCD mặt trước',
+                            url: frontUrl,
+                          ),
+                          _EkycLargeImage(
+                            label: 'CCCD mặt sau',
+                            url: backUrl,
+                          ),
+                          _EkycLargeImage(
+                            label: 'Ảnh nhận dạng khuôn mặt',
+                            url: faceUrl,
+                          ),
+                        ];
+                        if (wide) {
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              for (var i = 0; i < images.length; i++) ...[
+                                if (i > 0) const SizedBox(width: 10),
+                                Expanded(child: images[i]),
+                              ],
+                            ],
+                          );
+                        }
+                        return Column(
+                          children: [
+                            for (var i = 0; i < images.length; i++) ...[
+                              if (i > 0) const SizedBox(height: 12),
+                              images[i],
+                            ],
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _EkycEvidenceThumb extends StatelessWidget {
+  const _EkycEvidenceThumb({
+    required this.label,
+    required this.url,
+    required this.icon,
+  });
+
+  final String label;
+  final String url;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: url.isEmpty
+          ? null
+          : () => _showEkycImageViewer(context, title: label, url: url),
+      borderRadius: BorderRadius.circular(10),
+      child: Column(
+        children: [
+          AspectRatio(
+            aspectRatio: 4 / 3,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: ColoredBox(
+                color: const Color(0xFFE8EEF7),
+                child: url.isEmpty
+                    ? Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(icon, color: AppColors.textMuted),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Chưa có ảnh',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                        ],
+                      )
+                    : Image.network(
+                        url,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Icon(
+                          icon,
+                          color: AppColors.textMuted,
+                        ),
+                      ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EkycLargeImage extends StatelessWidget {
+  const _EkycLargeImage({required this.label, required this.url});
+
+  final String label;
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+        ),
+        const SizedBox(height: 6),
+        InkWell(
+          onTap: url.isEmpty
+              ? null
+              : () => _showEkycImageViewer(context, title: label, url: url),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: ColoredBox(
+              color: const Color(0xFFE8EEF7),
+              child: AspectRatio(
+                aspectRatio: 3 / 4,
+                child: url.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'Chưa có ảnh',
+                          style: TextStyle(color: AppColors.textMuted),
+                        ),
+                      )
+                    : Image.network(
+                        url,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => const Center(
+                          child: Icon(Icons.broken_image_outlined,
+                              color: AppColors.textMuted),
+                        ),
+                      ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+void _showEkycImageViewer(
+  BuildContext context, {
+  required String title,
+  required String url,
+}) {
+  showDialog<void>(
+    context: context,
+    builder: (ctx) => Dialog(
+      backgroundColor: Colors.black,
+      insetPadding: const EdgeInsets.all(12),
+      child: Stack(
+        children: [
+          InteractiveViewer(
+            minScale: 0.8,
+            maxScale: 4,
+            child: Center(
+              child: Image.network(
+                url,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => const Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Text(
+                    'Không tải được ảnh',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 8,
+            right: 8,
+            top: 8,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  icon: const Icon(Icons.close, color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _ReportsManageCard extends StatelessWidget {

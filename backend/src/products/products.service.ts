@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { Product } from '../entities/product.entity';
 import { ProductImage } from '../entities/product-image.entity';
 import { Score } from '../entities/score.entity';
@@ -45,7 +45,13 @@ export class ProductsService {
   async findAll(query: ProductQueryDto): Promise<Record<string, unknown>[]> {
     const qb = this.productRepo
       .createQueryBuilder('p')
-      .leftJoinAndSelect('p.seller', 'seller')
+      .leftJoin('p.seller', 'seller')
+      .addSelect([
+        'seller.userId',
+        'seller.displayName',
+        'seller.email',
+        'seller.kycStatus',
+      ])
       .leftJoinAndSelect('p.category', 'category')
       .where('p.status IN (:...statuses)', {
         statuses: ['Available', 'Reserved'],
@@ -104,7 +110,17 @@ export class ProductsService {
     qb.take(100);
 
     const rows = await qb.getMany();
-    return Promise.all(rows.map((p) => this.toListJson(p)));
+    const sellerIds = [
+      ...new Set(rows.map((p) => Number(p.seller?.userId ?? p.sellerId))),
+    ].filter((id) => id > 0);
+    const scores =
+      sellerIds.length > 0
+        ? await this.scoreRepo.find({ where: { userId: In(sellerIds) } })
+        : [];
+    const scoreByUser = new Map(
+      scores.map((s) => [Number(s.userId), s.currentPoint]),
+    );
+    return rows.map((p) => this.toListJson(p, scoreByUser));
   }
 
   /** Một số tin ghi "TP.HCM" thay vì tên tỉnh đầy đủ — gom alias khi lọc. */
@@ -141,7 +157,12 @@ export class ProductsService {
       imageUrls.push(product.thumbnailUrl);
     }
 
-    const list = await this.toListJson(product);
+    const sellerId = Number(product.seller!.userId);
+    const score = await this.scoreRepo.findOne({ where: { userId: sellerId } });
+    const list = this.toListJson(
+      product,
+      new Map([[sellerId, score?.currentPoint ?? 500]]),
+    );
     return {
       ...list,
       description: product.description,
@@ -320,11 +341,13 @@ export class ProductsService {
     return product;
   }
 
-  private async toListJson(product: Product): Promise<Record<string, unknown>> {
+  private toListJson(
+    product: Product,
+    scoreByUser?: Map<number, number>,
+  ): Record<string, unknown> {
     const seller = product.seller!;
-    const score = await this.scoreRepo.findOne({
-      where: { userId: Number(seller.userId) },
-    });
+    const sellerId = Number(seller.userId);
+    const trustScore = scoreByUser?.get(sellerId) ?? 500;
     const price = Number(product.price);
 
     return {
@@ -336,8 +359,8 @@ export class ProductsService {
       conditionPct: product.conditionPct,
       status: product.status,
       sellerName: seller.displayName ?? seller.email,
-      sellerId: Number(seller.userId),
-      trustScore: score?.currentPoint ?? 500,
+      sellerId,
+      trustScore,
       sellerVerified: seller.kycStatus === 'Verified',
       categoryName: product.category?.name ?? '',
       categoryId: product.categoryId,

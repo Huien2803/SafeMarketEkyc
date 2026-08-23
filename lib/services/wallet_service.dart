@@ -10,22 +10,18 @@ class WalletService {
   WalletService._();
   static final WalletService instance = WalletService._();
 
-  Map<String, String> get _headers => AuthService.instance.authHeaders;
-
-  Future<http.Response> _get(Uri uri) => AuthService.instance.authorizedRequest(
-        (h) => http.get(uri, headers: h).timeout(ApiConfig.timeout),
+  Future<http.Response> _get(String path) =>
+      AuthService.instance.authorizedRequest(
+        (h) => ApiConfig.httpGet(path, headers: h),
       );
 
-  Future<http.Response> _post(Uri uri, {Object? body}) =>
+  Future<http.Response> _post(String path, {Object? body}) =>
       AuthService.instance.authorizedRequest(
-        (h) => http
-            .post(uri, headers: h, body: body)
-            .timeout(ApiConfig.timeout),
+        (h) => ApiConfig.httpPost(path, headers: h, body: body),
       );
 
   Future<WalletInfo> getWallet() async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/wallet');
-    final res = await _get(uri);
+    final res = await _get('/wallet');
     if (res.statusCode != 200) {
       throw Exception('Không tải được ví');
     }
@@ -33,8 +29,7 @@ class WalletService {
   }
 
   Future<List<WithdrawalItem>> getWithdrawals() async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/wallet/withdrawals');
-    final res = await _get(uri);
+    final res = await _get('/wallet/withdrawals');
     if (res.statusCode != 200) return [];
     return (jsonDecode(res.body) as List<dynamic>)
         .map((e) => WithdrawalItem.fromJson(e as Map<String, dynamic>))
@@ -47,10 +42,9 @@ class WalletService {
     required String bankAccount,
     required String accountHolder,
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/wallet/withdrawals');
     final res = await _post(
-      uri,
-      body: jsonEncode({
+      '/wallet/withdrawals',
+      body: ApiConfig.encodeBody({
         'amount': amount,
         'bankName': bankName,
         'bankAccount': bankAccount,

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -70,17 +71,19 @@ class EkycService {
     File? idCard,
     File? selfie,
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/ekyc/face-match');
-    final req = http.MultipartRequest('POST', uri)
-      ..headers['Authorization'] = 'Bearer ${_requireToken()}'
-      ..fields['sessionId'] = sessionId;
-    if (idCard != null) {
-      req.files.add(await _multipart('idCard', idCard));
-    }
-    if (selfie != null) {
-      req.files.add(await _multipart('selfie', selfie));
-    }
-    final json = await _send(req);
+    final json = await ApiConfig.withFailover((base) async {
+      final uri = Uri.parse('$base/ekyc/face-match');
+      final req = http.MultipartRequest('POST', uri)
+        ..headers['Authorization'] = 'Bearer ${_requireToken()}'
+        ..fields['sessionId'] = sessionId;
+      if (idCard != null) {
+        req.files.add(await _multipart('idCard', idCard));
+      }
+      if (selfie != null) {
+        req.files.add(await _multipart('selfie', selfie));
+      }
+      return _send(req);
+    });
     return FaceMatchResult.fromJson(json);
   }
 
@@ -103,14 +106,13 @@ class EkycService {
 
   Future<EkycStatus> getMyStatus() async {
     final token = _requireToken();
-    final uri = Uri.parse('${ApiConfig.baseUrl}/ekyc/my-status');
-    final res = await http.get(
-      uri,
+    final res = await ApiConfig.httpGet(
+      '/ekyc/my-status',
       headers: {
         'Authorization': 'Bearer $token',
         'Accept': 'application/json',
       },
-    ).timeout(ApiConfig.timeout);
+    );
 
     final decoded = res.body.isNotEmpty
         ? jsonDecode(res.body) as Map<String, dynamic>
@@ -126,17 +128,11 @@ class EkycService {
     String path,
     Map<String, dynamic> body,
   ) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}$path');
-    final res = await http
-        .post(
-          uri,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ${_requireToken()}',
-          },
-          body: jsonEncode(body),
-        )
-        .timeout(ApiConfig.timeout);
+    final res = await ApiConfig.httpPost(
+      path,
+      headers: ApiConfig.jsonHeaders(token: _requireToken()),
+      body: ApiConfig.encodeBody(body),
+    );
     final decoded = res.body.isNotEmpty
         ? jsonDecode(res.body) as Map<String, dynamic>
         : <String, dynamic>{};
@@ -150,12 +146,14 @@ class EkycService {
     File file, {
     Map<String, String> fields = const {},
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}$path');
-    final req = http.MultipartRequest('POST', uri)
-      ..headers['Authorization'] = 'Bearer ${_requireToken()}'
-      ..fields.addAll(fields)
-      ..files.add(await _multipart(fieldName, file));
-    return _send(req);
+    return ApiConfig.withFailover((base) async {
+      final uri = Uri.parse('$base$path');
+      final req = http.MultipartRequest('POST', uri)
+        ..headers['Authorization'] = 'Bearer ${_requireToken()}'
+        ..fields.addAll(fields)
+        ..files.add(await _multipart(fieldName, file));
+      return _send(req);
+    });
   }
 
   Future<Map<String, dynamic>> _send(http.MultipartRequest req) async {
@@ -168,6 +166,12 @@ class EkycService {
       if (res.statusCode >= 200 && res.statusCode < 300) return decoded;
       throw AuthException(_extractError(decoded), statusCode: res.statusCode);
     } on AuthException {
+      rethrow;
+    } on TimeoutException {
+      rethrow; // để withFailover thử host khác
+    } on SocketException {
+      rethrow;
+    } on http.ClientException {
       rethrow;
     } catch (e) {
       throw AuthException('Không kết nối được server: $e');

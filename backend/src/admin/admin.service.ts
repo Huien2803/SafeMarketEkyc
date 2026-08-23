@@ -1,10 +1,13 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
 import { User } from '../entities/user.entity';
 import { Score, RankLevel } from '../entities/score.entity';
 import { PointLog } from '../entities/point-log.entity';
@@ -17,9 +20,12 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { PaymentsService } from '../payments/payments.service';
 import { WalletService } from '../wallet/wallet.service';
 import { ReputationService } from '../reputation/reputation.service';
+import { OcrProviderService } from '../ekyc/ocr-provider.service';
 
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
+
   constructor(
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(Score) private readonly scoreRepo: Repository<Score>,
@@ -33,6 +39,7 @@ export class AdminService {
     private readonly paymentsService: PaymentsService,
     private readonly walletService: WalletService,
     private readonly reputationService: ReputationService,
+    private readonly ocr: OcrProviderService,
   ) {}
 
   async getStats() {
@@ -73,39 +80,61 @@ export class AdminService {
 
   /** Số hồ sơ eKYC được duyệt trong 7 ngày gần nhất (cho biểu đồ admin). */
   private async getEkycTrend(): Promise<{ label: string; count: number }[]> {
-    try {
-      const raw: { dayDate: string; cnt: string }[] = await this.ekycRepo.query(`
-        SELECT CAST(verified_at AS date) AS dayDate, COUNT(*) AS cnt
-        FROM [Identity].[eKYC_Profiles]
-        WHERE verified_at >= DATEADD(day, -6, CAST(GETDATE() AS date))
-          AND verified_at IS NOT NULL
-        GROUP BY CAST(verified_at AS date)
-      `);
-      const counts = new Map<string, number>();
-      for (const row of raw) {
-        const key = String(row.dayDate).slice(0, 10);
-        counts.set(key, parseInt(row.cnt, 10) || 0);
-      }
-      const vnDays = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+    const vnDays = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+    const emptyTrend = (): { label: string; count: number }[] => {
       const trend: { label: string; count: number }[] = [];
       for (let i = 6; i >= 0; i--) {
         const d = new Date();
         d.setHours(0, 0, 0, 0);
         d.setDate(d.getDate() - i);
-        const key = d.toISOString().slice(0, 10);
-        trend.push({ label: vnDays[d.getDay()], count: counts.get(key) ?? 0 });
+        trend.push({ label: vnDays[d.getDay()], count: 0 });
       }
       return trend;
-    } catch {
-      return [
-        { label: 'T2', count: 0 },
-        { label: 'T3', count: 0 },
-        { label: 'T4', count: 0 },
-        { label: 'T5', count: 0 },
-        { label: 'T6', count: 0 },
-        { label: 'T7', count: 0 },
-        { label: 'CN', count: 0 },
-      ];
+    };
+
+    try {
+      // Gom theo offset ngày trên SQL — tránh lệch timezone và String(Date).slice(0,10)
+      // (mssql trả Date object → "Thu Aug 20..." không khớp "2026-08-20").
+      const raw: { offsetDays: number | string; cnt: number | string }[] =
+        await this.ekycRepo.query(`
+          WITH days AS (
+            SELECT n AS offsetDays,
+                   CAST(DATEADD(day, -n, CAST(GETDATE() AS date)) AS date) AS dayDate
+            FROM (VALUES (0),(1),(2),(3),(4),(5),(6)) AS t(n)
+          )
+          SELECT
+            d.offsetDays,
+            COUNT(p.kyc_id) AS cnt
+          FROM days d
+          LEFT JOIN [Identity].[eKYC_Profiles] p
+            ON p.verified_at IS NOT NULL
+           AND CAST(p.verified_at AS date) = d.dayDate
+          GROUP BY d.offsetDays
+          ORDER BY d.offsetDays DESC
+        `);
+
+      const byOffset = new Map<number, number>();
+      for (const row of raw) {
+        byOffset.set(
+          Number(row.offsetDays),
+          parseInt(String(row.cnt), 10) || 0,
+        );
+      }
+
+      const trend: { label: string; count: number }[] = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() - i);
+        trend.push({
+          label: vnDays[d.getDay()],
+          count: byOffset.get(i) ?? 0,
+        });
+      }
+      return trend;
+    } catch (err) {
+      this.logger.warn(`getEkycTrend failed: ${err}`);
+      return emptyTrend();
     }
   }
 
@@ -237,15 +266,78 @@ export class AdminService {
     const result: Record<string, unknown>[] = [];
     for (const u of users) {
       const profile = await this.ekycRepo.findOne({ where: { userId: u.userId } });
+      const dob = profile?.dob
+        ? (profile.dob instanceof Date
+            ? profile.dob.toISOString().slice(0, 10)
+            : String(profile.dob).slice(0, 10))
+        : null;
+      const faceCheck = await this.compareStoredFace(profile);
       result.push({
         userId: Number(u.userId),
         displayName: u.displayName ?? u.email,
+        email: u.email,
         fullName: profile?.fullName ?? u.displayName ?? '',
         idNumber: profile?.idNumber ?? '',
+        dob,
+        address: profile?.address ?? '',
+        idFrontUrl: profile?.idFrontUrl ?? null,
+        idBackUrl: profile?.idBackUrl ?? null,
+        faceUrl: profile?.faceVideoUrl ?? null,
+        submittedAt: profile?.submittedAt
+          ? profile.submittedAt.toISOString()
+          : null,
         hasProfile: !!profile,
+        faceMatchIsMatch: faceCheck?.isMatch ?? null,
+        faceSimilarity: faceCheck?.similarity ?? null,
+        faceMatchMessage: faceCheck?.message ?? null,
       });
     }
     return result;
+  }
+
+  /** So khớp lại ảnh CCCD mặt trước với selfie đã lưu — dùng khi duyệt hồ sơ. */
+  private async compareStoredFace(profile: EkycProfile | null): Promise<{
+    isMatch: boolean;
+    similarity: number;
+    message: string;
+  } | null> {
+    if (!profile?.idFrontUrl || !profile?.faceVideoUrl) return null;
+    const idCard = this.readUploadAsMulter(profile.idFrontUrl, 'id.jpg');
+    const selfie = this.readUploadAsMulter(profile.faceVideoUrl, 'selfie.jpg');
+    if (!idCard || !selfie) return null;
+    try {
+      return await this.ocr.matchFace(idCard, selfie);
+    } catch (err) {
+      this.logger.warn(
+        `Admin face-check user ${profile.userId}: ${(err as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  private readUploadAsMulter(
+    url: string,
+    filename: string,
+  ): Express.Multer.File | null {
+    const rel = url.replace(/^\/+/, '');
+    const full = join(process.cwd(), ...rel.split('/').filter(Boolean));
+    if (!existsSync(full)) {
+      this.logger.warn(`Không thấy file eKYC: ${full}`);
+      return null;
+    }
+    const buffer = readFileSync(full);
+    return {
+      fieldname: 'file',
+      originalname: filename,
+      encoding: '7bit',
+      mimetype: 'image/jpeg',
+      size: buffer.length,
+      buffer,
+      destination: '',
+      filename,
+      path: full,
+      stream: undefined as any,
+    };
   }
 
   async getLockedUsers() {
@@ -273,6 +365,14 @@ export class AdminService {
         fullName: user.displayName,
         submittedAt: new Date(),
       });
+    }
+
+    const faceCheck = await this.compareStoredFace(profile);
+    if (faceCheck && !faceCheck.isMatch) {
+      throw new BadRequestException(
+        faceCheck.message ||
+          'Khuôn mặt không khớp ảnh CCCD — không được phê duyệt. Hãy từ chối hồ sơ.',
+      );
     }
 
     profile.verifiedAt = new Date();
@@ -400,7 +500,7 @@ export class AdminService {
         this.scoreRepo.create({
           userId,
           currentPoint: 500,
-          rankLevel: 'Bronze',
+          rankLevel: 'Silver',
         }),
       );
     }

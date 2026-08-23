@@ -47,6 +47,9 @@ export class FaceMatchResponseDto {
   @ApiProperty({ example: 0.92, description: 'Độ giống nhau 0..1' })
   similarity: number;
 
-  @ApiProperty({ example: 'Khuôn mặt khớp' })
+  @ApiProperty({ example: 'Khuôn mặt khớp ảnh CCCD (92%).' })
   message: string;
+
+  @ApiProperty({ example: 'fpt', enum: ['fpt', 'vnpt', 'attested'] })
+  mode?: string;
 }

@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:http/http.dart' as http;
 import 'package:safemarket_app/services/api_config.dart';
 import 'package:safemarket_app/services/auth_service.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -33,13 +32,12 @@ class PaymentService {
   PaymentService._();
   static final PaymentService instance = PaymentService._();
 
-  Map<String, String> get _headers => AuthService.instance.authHeaders;
-
   Future<PaymentCheckoutResult> checkout(int orderId) async {
-    final uri =
-        Uri.parse('${ApiConfig.baseUrl}/payments/orders/$orderId/checkout');
     final res = await AuthService.instance.authorizedRequest(
-      (h) => http.post(uri, headers: h).timeout(ApiConfig.timeout),
+      (h) => ApiConfig.httpPost(
+        '/payments/orders/$orderId/checkout',
+        headers: h,
+      ),
     );
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -52,10 +50,11 @@ class PaymentService {
   }
 
   Future<void> simulatePay(int orderId) async {
-    final uri =
-        Uri.parse('${ApiConfig.baseUrl}/payments/orders/$orderId/simulate-pay');
     final res = await AuthService.instance.authorizedRequest(
-      (h) => http.post(uri, headers: h).timeout(ApiConfig.timeout),
+      (h) => ApiConfig.httpPost(
+        '/payments/orders/$orderId/simulate-pay',
+        headers: h,
+      ),
     );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       final body = jsonDecode(res.body) as Map<String, dynamic>;
